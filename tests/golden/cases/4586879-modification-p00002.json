@@ -1,0 +1,54 @@
+{
+  "case_id": "4586879-modification-p00002",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "$180M modification P00002 with a $280M cumulative face value",
+  "why": "Three dollar figures are in play and only one of them is the value of this action. Recording the cumulative face value as the amount, or the modification as a new award, inflates the contractor's apparent new business by $100M and double-counts the base contract.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "checks": [
+    {
+      "id": "one-row-for-the-modification",
+      "kind": "count",
+      "select": {"contractor_raw": "South Carolina Commission for the Blind"},
+      "expect": 1,
+      "quote": "South Carolina Commission for the Blind, Columbia, South Carolina, was awarded a $180,000,000 modification (P00002) to contract W9124C-25-D-A003 for full food services",
+      "reason": "One paragraph, one company, one action -> exactly one row."
+    },
+    {
+      "id": "modification-fields",
+      "kind": "row",
+      "select": {"contractor_raw": "South Carolina Commission for the Blind"},
+      "expect": {
+        "service_branch": "ARMY",
+        "contractor_city": "Columbia",
+        "contractor_state": "South Carolina",
+        "action_type": "modification",
+        "amount_usd": 180000000,
+        "cumulative_face_value_usd": 280000000,
+        "base_contract_number": "W9124C-25-D-A003",
+        "modification_number": "P00002",
+        "bids_solicited": 1,
+        "bids_received": 1,
+        "small_business": false,
+        "is_multi_award": false
+      },
+      "quote": "was awarded a $180,000,000 modification (P00002) to contract W9124C-25-D-A003 ... The amount of this action is $180,000,000 with a total cumulative face value of $280,000,000. One bid was solicited with one received.",
+      "reason": "amount_usd is the amount of THIS action ($180,000,000), stated explicitly. The $280,000,000 is the cumulative total AFTER the action and belongs in cumulative_face_value_usd. 'One bid was solicited with one received' states both counts, unlike the pool case. No asterisk on the name -> small_business false, not null."
+    },
+    {
+      "id": "not-a-new-award",
+      "kind": "absent",
+      "select": {"contractor_raw": "South Carolina Commission for the Blind", "action_type": "new_award"},
+      "quote": "was awarded a $180,000,000 modification (P00002) to contract W9124C-25-D-A003",
+      "reason": "The word 'modification' with a modification number and a named base contract is not a new award, however the sentence starts."
+    },
+    {
+      "id": "cumulative-is-never-the-amount",
+      "kind": "absent",
+      "select": {"contractor_raw": "South Carolina Commission for the Blind", "amount_usd": 280000000},
+      "quote": "The amount of this action is $180,000,000 with a total cumulative face value of $280,000,000.",
+      "reason": "The single most expensive extraction error in the corpus: reading the cumulative figure as this action's value."
+    }
+  ]
+}

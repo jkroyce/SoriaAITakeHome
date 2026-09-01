@@ -1,0 +1,122 @@
+{
+  "case_id": "4586879-amount-vs-other-money",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "amount_usd is the value of THIS action -- not the cumulative, the maximum, or the obligation",
+  "why": "Most paragraphs in this corpus carry two to four dollar figures. Exactly one is the value of the action being announced. Every other figure -- cumulative face value, maximum with options, funds obligated at time of award -- has its own meaning, and picking the wrong one is a silent multi-hundred-million-dollar error that no schema validation will catch.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "checks": [
+    {
+      "id": "rockwell-collins-action-vs-cumulative",
+      "kind": "row",
+      "select": {"contract_number": "W58RGZ-26-F-A009"},
+      "expect": {
+        "contractor_raw": "Rockwell Collins Inc.",
+        "contractor_city": "Cedar Rapids",
+        "contractor_state": "Iowa",
+        "service_branch": "ARMY",
+        "amount_usd": 38916896,
+        "cumulative_face_value_usd": 55146864,
+        "is_idiq": true,
+        "bids_solicited": 1,
+        "bids_received": 1
+      },
+      "quote": "Rockwell Collins Inc., Cedar Rapids, Iowa, was awarded a cost-plus-fixed-fee, indefinite-delivery/indefinite-quantity contract for command, control and communications integration ... The amount of this action is $38,916,896 with a total cumulative face value of $55,146,864. One bid was solicited with one received. ... Army Contracting Command, Redstone Arsenal, Alabama, is the contracting activity (W58RGZ-26-F-A009).",
+      "reason": "The award sentence names no figure at all; the amount appears only in 'The amount of this action is $38,916,896'. $55,146,864 is the cumulative."
+    },
+    {
+      "id": "environmental-chemical-max-is-not-the-amount",
+      "kind": "row",
+      "select": {"contract_number": "N40085-26-C-0020"},
+      "expect": {
+        "contractor_raw": "Environmental Chemical Corp.",
+        "service_branch": "NAVY",
+        "amount_usd": 128363354,
+        "cumulative_face_value_usd": null
+      },
+      "quote": "Environmental Chemical Corp., Burlingame, California, is awarded a $128,363,354 firm-fixed-price contract for construction services ... The maximum dollar value, including the base price and 13 options, is $174,443,268.",
+      "reason": "$174,443,268 is an option-inclusive maximum, not a cumulative face value and not this action's value. The text states no cumulative face value, so that field is null."
+    },
+    {
+      "id": "environmental-chemical-not-the-max",
+      "kind": "absent",
+      "select": {"contract_number": "N40085-26-C-0020", "amount_usd": 174443268},
+      "quote": "The maximum dollar value, including the base price and 13 options, is $174,443,268.",
+      "reason": "Recording the option-inclusive maximum as the award value overstates it by $46M."
+    },
+    {
+      "id": "paligen-cumulative-435m",
+      "kind": "row",
+      "select": {"contractor_raw": "Paligen Aerospace & Defense LLC,*"},
+      "expect": {
+        "service_branch": "ARMY",
+        "action_type": "modification",
+        "amount_usd": 30840628,
+        "cumulative_face_value_usd": 435000000,
+        "modification_number": "P00005",
+        "base_contract_number": "W519TC-25-F-0015",
+        "small_business": true
+      },
+      "quote": "Paligen Aerospace & Defense LLC,* Tampa, Florida, was awarded a $30,840,628 modification (P00005) to undefinitized contract action W519TC-25-F-0015 for design, construction and commissioning of a trinitrotoluene production facility. The total cumulative face value is $435,000,000.",
+      "reason": "A $30.8M action against a $435M cumulative -- a 14x error if the two are swapped."
+    },
+    {
+      "id": "kbr-services-non-p-modification-number",
+      "kind": "row",
+      "select": {"contractor_raw": "KBR Services LLC"},
+      "expect": {
+        "service_branch": "ARMY",
+        "action_type": "modification",
+        "amount_usd": 17000000,
+        "cumulative_face_value_usd": 165655369,
+        "modification_number": "001 CB",
+        "base_contract_number": "W52P1J-12-G-0061"
+      },
+      "quote": "KBR Services LLC, Houston, Texas, was awarded a $17,000,000 modification (001 CB) to contract W52P1J-12-G-0061 to complete care of supplies in storage and other maintenance of government equipment. The modification brings the total cumulative face value of the contract to $165,655,369.",
+      "reason": "A modification number is not always a P-number. '001 CB' is the token in parentheses after the word 'modification'."
+    },
+    {
+      "id": "northrop-obligation-is-not-the-amount",
+      "kind": "row",
+      "select": {"contract_number": "FA8214-26-F-B017"},
+      "expect": {
+        "contractor_raw": "Northrop Grumman Systems Corp.",
+        "service_branch": "AIR FORCE",
+        "amount_usd": 86069000
+      },
+      "quote": "Northrop Grumman Systems Corp., Riverdale, Utah, has been awarded an $86,069,000 task order (FA8214-26-F-B017) under previously awarded ground subsystem support contract 2.0 FA8214-21-D-0002 ... Fiscal 2026 procurement funds in the amount of $15,240,085 are being obligated at the time of award.",
+      "reason": "$15,240,085 is what was obligated on day one, not the value of the action. Obligation figures are never amount_usd."
+    },
+    {
+      "id": "northrop-not-the-obligation",
+      "kind": "absent",
+      "select": {"contract_number": "FA8214-26-F-B017", "amount_usd": 15240085},
+      "quote": "Fiscal 2026 procurement funds in the amount of $15,240,085 are being obligated at the time of award.",
+      "reason": "The phrase 'in the amount of' attaches to the obligation, and is the likeliest thing to be mistaken for 'the amount of this action'."
+    },
+    {
+      "id": "aleut-cumulative-after-not-before",
+      "kind": "row",
+      "select": {"contractor_raw": "Aleut Construction LLC,*"},
+      "expect": {
+        "service_branch": "AIR FORCE",
+        "action_type": "modification",
+        "amount_usd": 52525333,
+        "cumulative_face_value_usd": 56116956,
+        "modification_number": "P00001",
+        "base_contract_number": "FA8501-25-C-0005",
+        "small_business": true
+      },
+      "quote": "Aleut Construction LLC,* Reston, Virginia, has been awarded a $52,525,333 modification (P00001) to previously awarded contract FA8501-25-C-0005 for a narrow body paint booth. This modification brings the total cumulative face value of the contract to $56,116,956 from $3,591,623.",
+      "reason": "The sentence gives the cumulative both AFTER ($56,116,956) and BEFORE ($3,591,623). cumulative_face_value_usd is the total after this action."
+    },
+    {
+      "id": "aleut-not-the-prior-cumulative",
+      "kind": "absent",
+      "select": {"contractor_raw": "Aleut Construction LLC,*", "cumulative_face_value_usd": 3591623},
+      "quote": "brings the total cumulative face value of the contract to $56,116,956 from $3,591,623",
+      "reason": "$3,591,623 is the value before the modification."
+    }
+  ]
+}
