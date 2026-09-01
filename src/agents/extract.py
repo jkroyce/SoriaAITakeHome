@@ -410,11 +410,13 @@ def _repair(row: dict, repairs: list[str]) -> dict:
     # A modification that names no base contract is exactly the sort of thing a human
     # should look at; flag it rather than silently guessing.
     if row.get("action_type") in ("modification", "option_exercise") and not row.get("base_contract_number"):
-        if row.get("contract_number"):
-            row["base_contract_number"] = row["contract_number"]
-            repairs.append(f"base_contract_number defaulted to contract_number for {who!r}")
-        else:
-            repairs.append(f"{row['action_type']} with no contract number for {who!r}")
+        # Do NOT default to contract_number: a modification often carries its own
+        # number (P00002 against W9124C-25-D-A003), and copying it writes a wrong
+        # base rather than an honest null. A null is recoverable; a bad join key
+        # silently associates a mod with itself.
+        repairs.append(
+            f"{row['action_type']} names no base contract for {who!r}; "
+            "base_contract_number left null for review")
 
     # Confidence must exist and must be in range; a missing one is not an implicit 1.0.
     c = row.get("extraction_confidence")

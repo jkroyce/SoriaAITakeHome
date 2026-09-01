@@ -118,7 +118,9 @@ _need("review_queue", "review_id", "flagged_at", "agent", "item_key", "reason",
 
 TIER_ORDER: list[str] = [
     v for v in _field("materiality", "tier").json.get("enum", []) if v
-] or ["alert", "notable", "routine"]
+]
+if not TIER_ORDER:  # the contract is the only source of tiers; never a second copy
+    raise RuntimeError("materiality.tier carries no enum in src/schemas.py")
 TIER_RANK = {t: i for i, t in enumerate(TIER_ORDER)}
 
 DATE_COLS = {t: [f.name for f in fields if f.sql == "DATE"]
@@ -127,7 +129,7 @@ TS_COLS = {t: [f.name for f in fields if f.sql == "TIMESTAMP"]
            for t, (fields, _pk) in schemas.TABLES.items()}
 
 UI_TABLES = ["awards", "announcements", "entities", "materiality", "agent_runs",
-             "review_queue"]
+             "review_queue", "changes"]
 
 # Confidence at or below which the manager escalates, then flags for review (CLAUDE.md).
 CONFIDENCE_FLOOR = 0.7
@@ -277,10 +279,10 @@ def _empty(table: str) -> pd.DataFrame:
     return pd.DataFrame({c: pd.Series(dtype="object") for c in TABLE_COLS[table]})
 
 
-_NUMERIC = ("amount_usd", "cumulative_face_value_usd", "score", "input_tokens",
-            "output_tokens", "cost_usd", "confidence", "extraction_confidence",
-            "duration_ms", "n_bytes", "body_chars", "http_status", "bids_solicited",
-            "bids_received")
+_NUMERIC = tuple(sorted(
+    f.name for _t, (fs, _pk) in schemas.TABLES.items() for f in fs
+    if f.sql in {"BIGINT", "INTEGER", "DOUBLE"}
+))
 
 
 def _conform(df: pd.DataFrame, table: str) -> pd.DataFrame:
@@ -376,6 +378,9 @@ def demo_frames(seed: int = 7) -> dict:
     today = now.date()
     branches = [b for b in schemas.BRANCHES if b != "OTHER"]
     actions = list(schemas.ACTION_TYPES)
+    # Weights must not be coupled to the enum's length: a new action type
+    # would otherwise make demo mode raise ValueError.
+    _ACTION_WEIGHTS = ([6, 3, 2, 1] + [1] * len(actions))[:len(actions)]
 
     days = [today - timedelta(days=d) for d in range(0, 84, 3)]
     announcements, awards, materiality, entities, runs, reviews = [], [], [], [], [], []
@@ -397,7 +402,7 @@ def demo_frames(seed: int = 7) -> dict:
         })
         for ordinal in range(rng.randint(1, 3)):
             firm, ticker, parent, _rel = rng.choice(_DEMO_FIRMS)
-            action = rng.choices(actions, weights=[6, 3, 2, 1])[0]
+            action = rng.choices(actions, weights=_ACTION_WEIGHTS)[0]
             amount = int(rng.choice([1e7, 5e7, 1.5e8, 4e8, 9e8]) * rng.uniform(0.55, 1.9))
             cno = f"W{rng.randint(10, 99)}QKN-26-{rng.choice('DCF')}-{rng.randint(1000, 9999)}"
             is_mod = action == "modification"
@@ -558,8 +563,30 @@ def demo_frames(seed: int = 7) -> dict:
             "resolved": bool(i % 3 == 0),
         })
 
+    # Change events. In the real pipeline these come from the manager's set
+    # difference on award UIDs -- deterministic, never an agent. Demo mode fakes
+    # the output of that diff, not the diff itself.
+    score_by_uid = {m["award_uid"]: m["score"] for m in materiality}
+    tick_by_raw = {e["contractor_raw"]: e["ticker"] for e in entities}
+    changes = []
+    for a in sorted(awards, key=lambda r: str(r["announced_date"]), reverse=True)[:24]:
+        ctype = "new_award" if a["action_type"] == "new_award" else "amount_changed"
+        prev_v = None if ctype == "new_award" else usd(a["amount_usd"] * 0.6)
+        changes.append({
+            "change_id": f"chg-{a['award_uid'][:16]}",
+            "detected_at": now - timedelta(hours=rng.randint(1, 72)),
+            "change_type": ctype,
+            "announcement_id": a["announcement_id"],
+            "award_uid": a["award_uid"],
+            "ticker": tick_by_raw.get(a["contractor_raw"]),
+            "prev_value": prev_v,
+            "new_value": usd(a["amount_usd"]),
+            "materiality_score": score_by_uid.get(a["award_uid"]),
+        })
+
     raw = {"announcements": announcements, "awards": awards, "entities": entities,
-           "materiality": materiality, "agent_runs": runs, "review_queue": reviews}
+           "materiality": materiality, "agent_runs": runs, "review_queue": reviews,
+           "changes": changes}
     return {t: _conform(pd.DataFrame(rows, columns=TABLE_COLS[t]), t)
             for t, rows in raw.items()}
 
@@ -577,19 +604,13 @@ def enrich(frames: dict) -> pd.DataFrame:
     """
     aw = frames["awards"].copy()
 
-    mat = frames["materiality"][
-        ["award_uid", "score", "tier", "rationale", "drivers", "scored_at",
-         "scorer_model", "llm_cache_key", "skills_version"]
-    ].rename(columns={"llm_cache_key": "materiality_cache_key",
+    mat = frames["materiality"][TABLE_COLS["materiality"]].rename(columns={"llm_cache_key": "materiality_cache_key",
                       "skills_version": "materiality_skills_version"})
-    ent = frames["entities"][
-        ["contractor_raw", "normalized_name", "ticker", "parent_company", "relationship",
-         "is_public", "confidence", "reasoning", "resolver_model", "llm_cache_key",
-         "skills_version"]
-    ].rename(columns={"confidence": "entity_confidence",
+    ent = frames["entities"][TABLE_COLS["entities"]].rename(columns={"confidence": "entity_confidence",
                       "reasoning": "entity_reasoning",
                       "llm_cache_key": "entity_cache_key",
-                      "skills_version": "entity_skills_version"})
+                      "skills_version": "entity_skills_version",
+                      "resolved_at": "entity_resolved_at"})
 
     df = aw.merge(mat.drop_duplicates("award_uid"), on="award_uid", how="left")
     df = df.merge(ent.drop_duplicates("contractor_raw"), on="contractor_raw", how="left")
@@ -675,11 +696,49 @@ def tier_text(v) -> str:
 # View 1 -- change feed
 # ---------------------------------------------------------------------------------
 
+def _change_events(frames, df):
+    """The actual change feed: rows of `changes`, enriched from `awards`.
+
+    "What is new" is a set difference on award UIDs computed upstream by the
+    manager -- deterministic, never an agent (CLAUDE.md). This view only
+    displays what that difference found. Returns True when it rendered.
+    """
+    ch = frames.get("changes")
+    if ch is None or ch.empty:
+        return False
+
+    cols = ["award_uid", "contractor_raw", "amount_usd", "action_type", "service_branch"]
+    ev = ch.merge(df[[c for c in cols if c in df.columns]].drop_duplicates("award_uid"),
+                  on="award_uid", how="left")
+    ev = ev.sort_values(["materiality_score", "detected_at"],
+                        ascending=[False, False], na_position="last")
+
+    st.caption(f"{len(ev):,} change event(s) since the last refresh, most material first.")
+    show_table(pd.DataFrame({
+        "Detected": ev["detected_at"].map(iso_ts),
+        "Change": ev["change_type"].map(lambda v: txt(v).replace("_", " ")),
+        "Score": ev["materiality_score"],
+        "Ticker": ev["ticker"].map(lambda v: txt(v, "private")),
+        "Contractor": ev["contractor_raw"].map(txt),
+        "Amount": ev["amount_usd"].map(usd),
+        "Was": ev["prev_value"].map(txt),
+        "Now": ev["new_value"].map(txt),
+    }), height=260, key="change_events")
+    st.divider()
+    return True
+
+
 def view_feed(frames, df):
     st.subheader("Change feed")
     st.caption("Recent awards ranked by materiality. The ranking is a sort on the score "
                "the scoring agent assigned; the agent judges whether a change matters, "
                "never whether one occurred.")
+
+    rendered = _change_events(frames, df)
+    if not rendered:
+        st.caption("No change events recorded yet -- `changes` is populated by "
+                   "`manager tick`, which diffs award UIDs against the last run. "
+                   "Showing the materiality-ranked award list below.")
 
     if df.empty:
         empty_state("awards", "This is the landing view: recent awards ranked by "
@@ -1057,7 +1116,7 @@ def provenance_panel(frames, r) -> None:
         {"Step": "resolve_entity", "Model": txt(r.get("resolver_model")),
          "Confidence": conf(r.get("entity_confidence")),
          "Skills": txt(r.get("entity_skills_version")),
-         "Ran": DASH,
+         "Ran": iso_ts(r.get("entity_resolved_at")),
          "llm_cache_key": txt(r.get("entity_cache_key"))},
         {"Step": "score_materiality", "Model": txt(r.get("scorer_model")),
          "Confidence": DASH,

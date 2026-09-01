@@ -30,7 +30,7 @@ paragraph:
 - learned_from: announcement 4586879 (2026-08-31), the seven-company $160M USACE
   Louisville design-bid-build pool (W912QR-26-D-A044 .. A050), and the ten-company
   $145M NAVFAC petroleum/oil/lubricants pool (N39430-26-D-2011 .. 2020)
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.95
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.95
 
 ## R-002 · a modification is not a new award
 "was awarded a $180,000,000 modification (P00002) to contract W9124C-25-D-A003"
@@ -49,7 +49,7 @@ is one action against an existing vehicle:
 
 - learned_from: announcement 4586879 (2026-08-31), South Carolina Commission for the
   Blind, $180M P00002 on W9124C-25-D-A003, cumulative $280M
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.95
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.95
 
 ## R-003 · a modification that exercises an option is an option_exercise
 When the prose says the modification **exercises an option** ("The modification
@@ -61,7 +61,7 @@ modification in form, and the distinction is the one an investor cares about
 
 - learned_from: announcement 4586879 (2026-08-31), KBR Wyle Services LLC,
   $25,162,568 modification (P00003) to N0042125C1001 exercising an option
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.85
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.85
 
 ## R-004 · the asterisk is the small-business marker
 A trailing `*` on the contractor name — printed after the name or after the comma
@@ -71,8 +71,10 @@ part of the name "exactly as printed". The `*Small business` legend on the last 
 of the document is a footnote, **not an award** — never emit a row for it. No
 asterisk means `small_business` = false, not null.
 
-- learned_from: announcement 4586879 (2026-08-31), 8 of its entries asterisked
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.97
+- learned_from: announcement 4586879 (2026-08-31), 14 of its contractor
+  names asterisked (15 asterisks in the body, one of which is the trailing
+  `*Small business` legend, not a marker)
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.97
 
 ## R-005 · service branch is inherited from the ALL-CAPS header above
 Awards appear under ALL-CAPS section headers on their own line. Every award inherits
@@ -102,7 +104,7 @@ Office of the Secretary of Defense). Do **not** route DARPA or the Defense Healt
 Agency to `DEFENSE` merely because the word appears in the header.
 
 - learned_from: header census over all 50 cached announcements (`raw/articles/*.html`)
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.9
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.9
 
 ## R-006 · a task order against an existing IDIQ is a new_award with a parent
 "is being awarded a $9,747,240 task order (H9240826FE010), under an indefinite
@@ -114,7 +116,7 @@ action type is a judgement call the schema cannot express exactly.
 
 - learned_from: announcement 4586879 (2026-08-31), Raytheon Co. Silent Knight radar
   task order H9240826FE010 under H9240824D4343
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.75
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.75
 
 ## R-007 · bid counts: only record what is stated
 "One bid was solicited with one received" -> `bids_solicited` = 1, `bids_received` = 1.
@@ -125,7 +127,7 @@ action type is a judgement call the schema cannot express exactly.
 received count, and never write 0 for "not stated".
 
 - learned_from: announcement 4586879 (2026-08-31), all three phrasings present
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.92
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.92
 
 ## R-008 · the amount is the amount of THIS action
 When a paragraph carries more than one dollar figure, `amount_usd` is the value of the
@@ -143,7 +145,7 @@ and, if a reviewer needs them, belong in `extraction_notes`.
 - learned_from: announcement 4586879 (2026-08-31), Environmental Chemical Corp.
   ($128,363,354 award vs. $174,443,268 maximum with 13 options); Rockwell Collins
   ($38,916,896 this action vs. $55,146,864 cumulative)
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.93
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.93
 
 ## R-009 · a trailing "(Awarded Aug. 28, 2026)" does not change announced_date
 Some entries end with a parenthetical award date earlier than the announcement date.
@@ -153,4 +155,4 @@ not by you. Do not try to correct it; if the discrepancy matters, mention it in
 
 - learned_from: announcement 4586879 (2026-08-31), several entries marked
   "(Awarded Aug. 28, 2026)"
-- added: 2026-09-01 · by: extract@haiku-4-5 · confidence: 0.9
+- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.9

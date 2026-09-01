@@ -318,7 +318,12 @@ def load_manifest(conn: duckdb.DuckDBPyConnection,
     rows = []
     for e in entries:
         prov = e.get("provenance") or {}
-        aid = str(e.get("article_id") or e.get("announcement_id"))
+        aid = e.get("article_id") or e.get("announcement_id")
+        if aid is None:
+            raise ValueError(
+                f"manifest entry has neither article_id nor announcement_id: {e!r}. "
+                "Coercing would write the string 'None' as a primary key.")
+        aid = str(aid)
         rows.append({
             "announcement_id": aid,
             "announced_date": e.get("announced_date"),
@@ -439,9 +444,8 @@ def awards_for_ticker(conn: duckdb.DuckDBPyConnection, ticker: str) -> list[dict
 
 def recent_changes(conn: duckdb.DuckDBPyConnection, limit: int = 50) -> list[dict[str, Any]]:
     """The alert feed: newest changes, most material first within a detection batch."""
-    return query(conn, """
-        SELECT change_id, detected_at, change_type, announcement_id, award_uid,
-               ticker, prev_value, new_value, materiality_score
+    return query(conn, f"""
+        SELECT {', '.join(columns("changes"))}
         FROM changes
         ORDER BY detected_at DESC, materiality_score DESC NULLS LAST
         LIMIT ?
@@ -470,8 +474,7 @@ def review_queue(conn: duckdb.DuckDBPyConnection,
     """What a human still has to look at -- least confident first."""
     where = "" if include_resolved else "WHERE resolved IS NOT TRUE"
     return query(conn, f"""
-        SELECT review_id, flagged_at, agent, item_key, reason, confidence,
-               payload, resolved
+        SELECT {', '.join(columns("review_queue"))}
         FROM review_queue
         {where}
         ORDER BY confidence ASC NULLS FIRST, flagged_at DESC
