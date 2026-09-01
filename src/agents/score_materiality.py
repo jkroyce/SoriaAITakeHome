@@ -960,7 +960,10 @@ def top_awards(conn, limit: int = 25, tier: str | None = None) -> list[dict]:
 
 _AWARD_RE = re.compile(r"\b(?:is|was|are|were|has been|have been)\s+(?:being\s+)?award",
                        re.IGNORECASE)
-_NAME_RE = re.compile(r"^(?P<name>[A-Z0-9][^,;]{2,90}?)\s*(?:,\s*\*|\*)?\s*,\s+[A-Z]")
+# "Acme Corp., Dayton, Ohio", "Acme Corp.,* Dayton, Ohio" and "Acme Corp.* Dayton"
+# are all the same convention; the small-business asterisk may or may not follow a comma.
+_NAME_RE = re.compile(
+    r"^(?P<name>[A-Z0-9][^,;]{2,90}?)\s*(?:,\s*\*\s+|\*\s*,?\s+|,\s+)(?=[A-Z])")
 _STAR_RE = re.compile(r"^[^,;]{2,90},?\*")
 _DOLLAR_RE = re.compile(r"\$([\d,]+(?:\.\d+)?)\s*(billion|million)?", re.IGNORECASE)
 _BRANCH_RE = re.compile(r"^(ARMY|NAVY|AIR FORCE|DEFENSE LOGISTICS AGENCY|SPACE FORCE|"
