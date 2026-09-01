@@ -1,0 +1,83 @@
+{
+  "case_id": "4586879-navfac-pool-ten",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "Ten-company $145M NAVFAC petroleum/oil/lubricants multiple-award contract",
+  "why": "A second multi-award pool, worded completely differently from the Army one -- 'were awarded a combined $145,000,000 ... multiple award contract' instead of 'will compete for each order of'. A rule tuned to the Army phrasing must still get this one right, and small-business status differs company by company inside the pool.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "checks": [
+    {
+      "id": "ten-rows",
+      "kind": "count",
+      "select": {"contract_number": {"in": ["N39430-26-D-2011", "N39430-26-D-2012", "N39430-26-D-2013", "N39430-26-D-2014", "N39430-26-D-2015", "N39430-26-D-2016", "N39430-26-D-2017", "N39430-26-D-2018", "N39430-26-D-2019", "N39430-26-D-2020"]}},
+      "expect": 10,
+      "quote": "AECOM Technical Services Inc., Los Angeles, California (N39430-26-D-2011); Aptim Federal Services LLC, Baton Rouge, Louisiana (N39430-26-D-2012); Argus Consulting Inc.,* Overland Park, Kansas (N39430-26-D-2013); Austin Brockenbrough & Associates LLC, Richmond, Virginia (N39430-26-D-2014); Burns & McDonnell Engineering Co. Inc., Kansas City, Missouri (N39430-26-D-2015); Enterprise Engineering Inc.,* Anchorage, Alaska (N39430-26-D-2016); HDR Engineering Inc., Omaha, Nebraska (N39430-26-D-2017); Pond & Co., Peachtree Corners, Georgia (N39430-26-D-2018); Robert and Co. Inc.,* Atlanta, Georgia (N39430-26-D-2019); and Tetra Tech Inc., Collinsville, Illinois (N39430-26-D-2020), were awarded a combined $145,000,000 firm-fixed-price, indefinite-delivery/indefinite-quantity, multiple award contract.",
+      "reason": "Ten company names, ten contract numbers, one paragraph. The text confirms the count itself: 'The maximum dollar value for all 10 contracts is $145,000,000'."
+    },
+    {
+      "id": "every-navfac-row-carries-full-ceiling",
+      "kind": "count",
+      "select": {"contract_number": {"startswith": "N39430-26-D-20"}, "amount_usd": 145000000},
+      "expect": 10,
+      "quote": "were awarded a combined $145,000,000 firm-fixed-price, indefinite-delivery/indefinite-quantity, multiple award contract. ... The maximum dollar value for all 10 contracts is $145,000,000 over a five-year base period.",
+      "reason": "$145,000,000 is explicitly the total for all ten contracts, so it is the shared ceiling repeated on every row -- not $14.5M each, and not the $10,000 per-awardee minimum guarantee."
+    },
+    {
+      "id": "aecom-first-in-pool",
+      "kind": "row",
+      "select": {"contract_number": "N39430-26-D-2011"},
+      "expect": {
+        "contractor_raw": "AECOM Technical Services Inc.",
+        "contractor_city": "Los Angeles",
+        "contractor_state": "California",
+        "service_branch": "NAVY",
+        "amount_usd": 145000000,
+        "is_multi_award": true,
+        "is_idiq": true,
+        "small_business": false,
+        "bids_solicited": null,
+        "bids_received": 14
+      },
+      "quote": "AECOM Technical Services Inc., Los Angeles, California (N39430-26-D-2011); ... were awarded a combined $145,000,000 firm-fixed-price, indefinite-delivery/indefinite-quantity, multiple award contract. ... This contract was competitively procured via the SAM.gov website, with 14 offers received.",
+      "reason": "No asterisk on AECOM -> small_business false. The paragraph says indefinite-delivery/indefinite-quantity in so many words -> is_idiq true. 14 offers received, solicited count not stated -> null."
+    },
+    {
+      "id": "argus-asterisked-inside-the-pool",
+      "kind": "row",
+      "select": {"contract_number": "N39430-26-D-2013"},
+      "expect": {
+        "contractor_raw": "Argus Consulting Inc.,*",
+        "contractor_city": "Overland Park",
+        "contractor_state": "Kansas",
+        "amount_usd": 145000000,
+        "is_multi_award": true,
+        "small_business": true
+      },
+      "quote": "Argus Consulting Inc.,* Overland Park, Kansas (N39430-26-D-2013)",
+      "reason": "Small-business status is per company inside a pool: Argus carries the asterisk, AECOM does not. A rule that sets small_business for the whole paragraph fails here."
+    },
+    {
+      "id": "tetra-tech-last-in-pool",
+      "kind": "row",
+      "select": {"contract_number": "N39430-26-D-2020"},
+      "expect": {
+        "contractor_raw": "Tetra Tech Inc.",
+        "contractor_city": "Collinsville",
+        "contractor_state": "Illinois",
+        "amount_usd": 145000000,
+        "is_multi_award": true,
+        "small_business": false
+      },
+      "quote": "and Tetra Tech Inc., Collinsville, Illinois (N39430-26-D-2020), were awarded a combined $145,000,000 firm-fixed-price, indefinite-delivery/indefinite-quantity, multiple award contract.",
+      "reason": "The tenth awardee sits directly against the shared verb phrase and is the one most likely to be dropped or merged."
+    },
+    {
+      "id": "minimum-guarantee-is-not-the-amount",
+      "kind": "absent",
+      "select": {"contract_number": {"startswith": "N39430-26-D-20"}, "amount_usd": 10000},
+      "quote": "Fiscal 2026 Navy working capital funds in the amount of $10,000 per awardee will be obligated at time of award to satisfy the minimum guarantee.",
+      "reason": "An obligation/minimum-guarantee figure is never amount_usd."
+    }
+  ]
+}

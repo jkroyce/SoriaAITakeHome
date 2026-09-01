@@ -1,0 +1,74 @@
+{
+  "case_id": "4586879-branch-headers",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "Service branch is inherited from the ALL-CAPS header, including one that must fall to OTHER",
+  "why": "Branch is not printed on the award; it is inherited from the nearest ALL-CAPS header above it. This announcement carries five headers, one of which (U.S. SPECIAL OPERATIONS COMMAND) has no enum value and must become OTHER rather than being forced into DEFENSE or dropped to null. Getting inheritance wrong silently reassigns awards between branches in every by-branch aggregate.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "headers_in_document": ["ARMY", "NAVY", "AIR FORCE", "U.S. SPECIAL OPERATIONS COMMAND", "DEFENSE LOGISTICS AGENCY"],
+  "checks": [
+    {
+      "id": "army-first-section",
+      "kind": "row",
+      "select": {"contract_number": "W15QKN-26-D-A084"},
+      "expect": {"service_branch": "ARMY"},
+      "quote": "ARMY\\nAction Manufacturing Co.,* Bristol, Pennsylvania, was awarded a $712,480,000 firm-fixed-price, indefinite-delivery/indefinite-quantity contract",
+      "reason": "First award under the first header."
+    },
+    {
+      "id": "army-last-in-section",
+      "kind": "row",
+      "select": {"contract_number": "W51701-26-C-A205"},
+      "expect": {"service_branch": "ARMY"},
+      "quote": "Tern AI Inc., Austin, Texas, was awarded an $11,263,793 firm-fixed-price contract ... Army FUZE Contracting Center, Arlington, Virginia, is the contracting activity (W51701-26-C-A205).",
+      "reason": "The last award before the NAVY header still inherits ARMY. Inheritance runs to the next header, not to the next paragraph."
+    },
+    {
+      "id": "navy-section",
+      "kind": "row",
+      "select": {"contract_number": "N00104-26-C-K215"},
+      "expect": {"service_branch": "NAVY", "contractor_raw": "Lockheed Martin Corp."},
+      "quote": "NAVY\\n... Lockheed Martin Corp., Moorestown, New Jersey, is awarded $26,152,726 for a firm-fixed-price contract for the refurbishment of 44 5W83 VLA thrust vectors ... Naval Supply Systems Command Weapon Systems Support, Mechanicsburg, Pennsylvania, is the contracting activity (N00104-26-C-K215).",
+      "reason": "Under the NAVY header."
+    },
+    {
+      "id": "air-force-section",
+      "kind": "row",
+      "select": {"contract_number": "FA8214-26-F-B017"},
+      "expect": {"service_branch": "AIR FORCE", "contractor_raw": "Northrop Grumman Systems Corp."},
+      "quote": "AIR FORCE\\nNorthrop Grumman Systems Corp., Riverdale, Utah, has been awarded an $86,069,000 task order (FA8214-26-F-B017) under previously awarded ground subsystem support contract 2.0 FA8214-21-D-0002 for remote visual assessment (RVA) program support.",
+      "reason": "Under the AIR FORCE header."
+    },
+    {
+      "id": "socom-falls-to-other",
+      "kind": "row",
+      "select": {"contractor_raw": "Raytheon Co."},
+      "expect": {"service_branch": "OTHER"},
+      "quote": "U.S. SPECIAL OPERATIONS COMMAND\\nRaytheon Co., McKinney, Texas, is being awarded a $9,747,240 task order (H9240826FE010), under an indefinite delivery-indefinite quantity contract for the Silent Knight Radar Antennae Gimbal-4 program.",
+      "reason": "'U.S. SPECIAL OPERATIONS COMMAND' is not one of the nine enum values in schemas.BRANCHES, so the contract requires OTHER. It is emphatically not AIR FORCE (the section above it) and not DEFENSE."
+    },
+    {
+      "id": "socom-award-not-attributed-to-air-force",
+      "kind": "absent",
+      "select": {"contractor_raw": "Raytheon Co.", "service_branch": "AIR FORCE"},
+      "quote": "U.S. SPECIAL OPERATIONS COMMAND\\nRaytheon Co., McKinney, Texas, is being awarded a $9,747,240 task order",
+      "reason": "The commonest inheritance bug is carrying the previous header past an unrecognised one."
+    },
+    {
+      "id": "dla-last-section",
+      "kind": "row",
+      "select": {"contract_number": "SPRDL1-26-C-0111"},
+      "expect": {"service_branch": "DEFENSE LOGISTICS AGENCY", "contractor_raw": "Kit Masters Inc.,*", "small_business": true},
+      "quote": "DEFENSE LOGISTICS AGENCY\\nKit Masters Inc.,* Perham, Minnesota, has been awarded an estimated $9,235,200 firm-fixed-price contract for engine fan clutches. ... The contracting activity is Defense Logistics Agency Weapons Support, Warren, Michigan (SPRDL1-26-C-0111).",
+      "reason": "The header matches an enum value exactly. Note that 'Using military service is Army' appears in this entry -- the using service is not the announcing branch and must not override the header."
+    },
+    {
+      "id": "using-service-does-not-override-header",
+      "kind": "absent",
+      "select": {"contract_number": "SPRDL1-26-C-0111", "service_branch": "ARMY"},
+      "quote": "Using military service is Army. Type of appropriation is fiscal 2026 through 2028 Army working capital funds. The contracting activity is Defense Logistics Agency Weapons Support, Warren, Michigan (SPRDL1-26-C-0111).",
+      "reason": "service_branch is defined as the section this award appeared under, not the service that will use the goods."
+    }
+  ]
+}
