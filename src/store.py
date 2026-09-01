@@ -36,7 +36,7 @@ import json
 import pathlib
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping, Sequence
 
 import duckdb
