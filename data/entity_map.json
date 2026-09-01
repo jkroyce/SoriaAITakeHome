@@ -1,0 +1,665 @@
+{
+  "schema_version": "1.0.0",
+  "key": "normalized contractor name (see resolve_entity.normalize); raw_variants lists every printed spelling that maps here. entities.contractor_raw stays RAW -- this key is not that key.",
+  "updated_at": "2026-09-01T23:40:48+00:00",
+  "n_entities": 38,
+  "entities": {
+    "boeing": {
+      "contractor_raw": "The Boeing Co.",
+      "normalized_name": "The Boeing Company",
+      "ticker": "BA",
+      "parent_company": "The Boeing Company",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'The Boeing Company' in data/universe.csv -> BA (The Boeing Company); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Boeing Co.",
+        "The Boeing Co."
+      ]
+    },
+    "booz allen hamilton": {
+      "contractor_raw": "Booz Allen Hamilton Inc.",
+      "normalized_name": "Booz Allen Hamilton",
+      "ticker": "BAH",
+      "parent_company": "Booz Allen Hamilton Holding Corporation",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Booz Allen Hamilton' in data/universe.csv -> BAH (Booz Allen Hamilton Holding Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Booz Allen Hamilton Inc."
+      ]
+    },
+    "caci federal": {
+      "contractor_raw": "CACI Inc. - Federal",
+      "normalized_name": "CACI Inc-Federal",
+      "ticker": "CACI",
+      "parent_company": "CACI International Inc",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'CACI Inc-Federal' in data/universe.csv -> CACI (CACI International Inc); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "CACI Inc. - Federal"
+      ]
+    },
+    "general dynamics electric boat": {
+      "contractor_raw": "General Dynamics Electric Boat Corp.",
+      "normalized_name": "General Dynamics Electric Boat",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'General Dynamics Corporation' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics Electric Boat Corp."
+      ]
+    },
+    "general dynamics information technology": {
+      "contractor_raw": "General Dynamics Information Technology Inc.",
+      "normalized_name": "General Dynamics Information Technology",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'General Dynamics Information Technology' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics Information Technology Inc."
+      ]
+    },
+    "general dynamics land system": {
+      "contractor_raw": "General Dynamics Land System",
+      "normalized_name": "General Dynamics Land System",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'General Dynamics Corporation' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics Land System"
+      ]
+    },
+    "general dynamics land systems": {
+      "contractor_raw": "General Dynamics Land Systems Inc.",
+      "normalized_name": "General Dynamics Land Systems",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'General Dynamics Land Systems' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics Land Systems Inc."
+      ]
+    },
+    "general dynamics land systems customer service and support": {
+      "contractor_raw": "General Dynamics Land Systems Customer Service and Support Co.",
+      "normalized_name": "General Dynamics Land Systems Customer Service and Support",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'General Dynamics Land Systems' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics Land Systems Customer Service and Support Co."
+      ]
+    },
+    "general dynamics mission systems": {
+      "contractor_raw": "General Dynamics Mission Systems Inc.",
+      "normalized_name": "General Dynamics Mission Systems",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'General Dynamics Mission Systems' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics Mission Systems",
+        "General Dynamics Mission Systems Inc."
+      ]
+    },
+    "general dynamics one source": {
+      "contractor_raw": "General Dynamics One Source LLC",
+      "normalized_name": "General Dynamics One Source",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'General Dynamics Corporation' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics One Source LLC"
+      ]
+    },
+    "general dynamics ordnance and tactical systems defense research institute": {
+      "contractor_raw": "General Dynamics Ordnance and Tactical Systems Defense Research Institute Inc.",
+      "normalized_name": "General Dynamics Ordnance and Tactical Systems Defense Research Institute",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'General Dynamics Corporation' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics Ordnance and Tactical Systems Defense Research Institute Inc."
+      ]
+    },
+    "general dynamics ots": {
+      "contractor_raw": "General Dynamics-OTS Inc.",
+      "normalized_name": "General Dynamics-OTS",
+      "ticker": "GD",
+      "parent_company": "General Dynamics Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'General Dynamics Corporation' in data/universe.csv -> GD (General Dynamics Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "General Dynamics-OTS Inc."
+      ]
+    },
+    "huntington ingalls": {
+      "contractor_raw": "Huntington Ingalls Inc.",
+      "normalized_name": "Huntington Ingalls",
+      "ticker": "HII",
+      "parent_company": "Huntington Ingalls Industries Inc",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Huntington Ingalls' in data/universe.csv -> HII (Huntington Ingalls Industries Inc); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Huntington Ingalls Inc."
+      ]
+    },
+    "l3 technologies": {
+      "contractor_raw": "L3 Technologies Inc.",
+      "normalized_name": "L3 Technologies",
+      "ticker": "LHX",
+      "parent_company": "L3Harris Technologies Inc",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'L3 Technologies' in data/universe.csv -> LHX (L3Harris Technologies Inc); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "L3 Technologies",
+        "L3 Technologies Inc."
+      ]
+    },
+    "l3harris": {
+      "contractor_raw": "L3Harris Corp.",
+      "normalized_name": "L3Harris",
+      "ticker": "LHX",
+      "parent_company": "L3Harris Technologies Inc",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'L3Harris' in data/universe.csv -> LHX (L3Harris Technologies Inc); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "L3Harris Corp."
+      ]
+    },
+    "l3harris technologies": {
+      "contractor_raw": "L3Harris Technologies Inc.",
+      "normalized_name": "L3Harris Technologies Inc",
+      "ticker": "LHX",
+      "parent_company": "L3Harris Technologies Inc",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'L3Harris Technologies Inc' in data/universe.csv -> LHX (L3Harris Technologies Inc); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "L3Harris Technologies Inc."
+      ]
+    },
+    "l3harris technologies communication systems west": {
+      "contractor_raw": "L3Harris Technologies Communication Systems – West",
+      "normalized_name": "L3Harris Technologies Communication Systems – West",
+      "ticker": "LHX",
+      "parent_company": "L3Harris Technologies Inc",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'L3Harris Technologies Inc' in data/universe.csv -> LHX (L3Harris Technologies Inc); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "L3Harris Technologies Communication Systems – West"
+      ]
+    },
+    "leidos": {
+      "contractor_raw": "Leidos Inc.",
+      "normalized_name": "Leidos",
+      "ticker": "LDOS",
+      "parent_company": "Leidos Holdings Inc",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Leidos' in data/universe.csv -> LDOS (Leidos Holdings Inc); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Leidos Inc."
+      ]
+    },
+    "lockheed martin": {
+      "contractor_raw": "Lockheed Martin Corporation",
+      "normalized_name": "Lockheed Martin Corporation",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Lockheed Martin Corporation' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin",
+        "Lockheed Martin Corp.",
+        "Lockheed Martin Corporation"
+      ]
+    },
+    "lockheed martin aeronautics": {
+      "contractor_raw": "Lockheed Martin Aeronautics Co.",
+      "normalized_name": "Lockheed Martin Aeronautics",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Lockheed Martin Aeronautics' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Aeronautics Co."
+      ]
+    },
+    "lockheed martin missile and fire control": {
+      "contractor_raw": "Lockheed Martin Missile and Fire Control",
+      "normalized_name": "Lockheed Martin Missile and Fire Control",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Lockheed Martin Corporation' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Missile and Fire Control"
+      ]
+    },
+    "lockheed martin missiles and fire control": {
+      "contractor_raw": "Lockheed Martin Corp. Missiles and Fire Control",
+      "normalized_name": "Lockheed Martin Corp. Missiles and Fire Control",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Lockheed Martin Corporation' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Corp. Missiles and Fire Control"
+      ]
+    },
+    "lockheed martin rotary and mission systems": {
+      "contractor_raw": "Lockheed Martin Corp. Rotary & Mission Systems",
+      "normalized_name": "Lockheed Martin Rotary and Mission Systems",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Lockheed Martin Rotary and Mission Systems' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Corp. Rotary & Mission Systems",
+        "Lockheed Martin Rotary & Mission Systems",
+        "Lockheed Martin Rotary and Mission Systems"
+      ]
+    },
+    "lockheed martin rotary mission systems": {
+      "contractor_raw": "Lockheed Martin Rotary Mission Systems",
+      "normalized_name": "Lockheed Martin Rotary Mission Systems",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Lockheed Martin Corporation' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Rotary Mission Systems"
+      ]
+    },
+    "lockheed martin services": {
+      "contractor_raw": "Lockheed Martin Services LLC",
+      "normalized_name": "Lockheed Martin Services",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Lockheed Martin Corporation' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Services LLC"
+      ]
+    },
+    "lockheed martin sippican": {
+      "contractor_raw": "Lockheed Martin Sippican Inc.",
+      "normalized_name": "Lockheed Martin Sippican",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Lockheed Martin Corporation' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Sippican Inc."
+      ]
+    },
+    "lockheed martin space": {
+      "contractor_raw": "Lockheed Martin Space",
+      "normalized_name": "Lockheed Martin Space",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Lockheed Martin Corporation' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Lockheed Martin Space"
+      ]
+    },
+    "northrop grumman": {
+      "contractor_raw": "Northrop Grumman Corp.",
+      "normalized_name": "Northrop Grumman Corporation",
+      "ticker": "NOC",
+      "parent_company": "Northrop Grumman Corporation",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Northrop Grumman Corporation' in data/universe.csv -> NOC (Northrop Grumman Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Northrop Grumman",
+        "Northrop Grumman Corp."
+      ]
+    },
+    "northrop grumman aerospace systems": {
+      "contractor_raw": "Northrop Grumman Aerospace Systems",
+      "normalized_name": "Northrop Grumman Aerospace Systems",
+      "ticker": "NOC",
+      "parent_company": "Northrop Grumman Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Northrop Grumman Corporation' in data/universe.csv -> NOC (Northrop Grumman Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Northrop Grumman Aerospace Systems"
+      ]
+    },
+    "northrop grumman systems": {
+      "contractor_raw": "Northrop Grumman Systems Corp.",
+      "normalized_name": "Northrop Grumman Systems",
+      "ticker": "NOC",
+      "parent_company": "Northrop Grumman Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Northrop Grumman Systems' in data/universe.csv -> NOC (Northrop Grumman Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Northrop Grumman Systems Corp."
+      ]
+    },
+    "raytheon": {
+      "contractor_raw": "Raytheon Corp.",
+      "normalized_name": "Raytheon",
+      "ticker": "RTX",
+      "parent_company": "RTX Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Raytheon' in data/universe.csv -> RTX (RTX Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Raytheon",
+        "Raytheon Co.",
+        "Raytheon Corp."
+      ]
+    },
+    "raytheon technologies": {
+      "contractor_raw": "Raytheon Technologies",
+      "normalized_name": "Raytheon Technologies",
+      "ticker": "RTX",
+      "parent_company": "RTX Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Raytheon Technologies' in data/universe.csv -> RTX (RTX Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Raytheon Technologies"
+      ]
+    },
+    "rockwell collins": {
+      "contractor_raw": "Rockwell Collins Inc.",
+      "normalized_name": "Rockwell Collins",
+      "ticker": "RTX",
+      "parent_company": "RTX Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Rockwell Collins' in data/universe.csv -> RTX (RTX Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Rockwell Collins Inc."
+      ]
+    },
+    "rockwell collins esa vision systems": {
+      "contractor_raw": "Rockwell Collins ESA Vision Systems LLC",
+      "normalized_name": "Rockwell Collins ESA Vision Systems",
+      "ticker": "RTX",
+      "parent_company": "RTX Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Rockwell Collins' in data/universe.csv -> RTX (RTX Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Rockwell Collins ESA Vision Systems LLC"
+      ]
+    },
+    "rockwell collins simulation and training solutions": {
+      "contractor_raw": "Rockwell Collins Simulation and Training Solutions LLC",
+      "normalized_name": "Rockwell Collins Simulation and Training Solutions",
+      "ticker": "RTX",
+      "parent_company": "RTX Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.94,
+      "reasoning": "Deterministic alias prefix match on 'Rockwell Collins' in data/universe.csv -> RTX (RTX Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Rockwell Collins Simulation and Training Solutions LLC"
+      ]
+    },
+    "rtx": {
+      "contractor_raw": "RTX Corp.",
+      "normalized_name": "RTX Corporation",
+      "ticker": "RTX",
+      "parent_company": "RTX Corporation",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'RTX Corporation' in data/universe.csv -> RTX (RTX Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "RTX Corp."
+      ]
+    },
+    "science applications international": {
+      "contractor_raw": "Science Applications International Corp.",
+      "normalized_name": "Science Applications International Corporation",
+      "ticker": "SAIC",
+      "parent_company": "Science Applications International Corporation",
+      "relationship": "direct",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Science Applications International Corporation' in data/universe.csv -> SAIC (Science Applications International Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Science Applications International Corp."
+      ]
+    },
+    "sikorsky aircraft": {
+      "contractor_raw": "Sikorsky Aircraft Corporation",
+      "normalized_name": "Sikorsky Aircraft",
+      "ticker": "LMT",
+      "parent_company": "Lockheed Martin Corporation",
+      "relationship": "subsidiary",
+      "is_public": true,
+      "confidence": 0.99,
+      "reasoning": "Deterministic exact alias match on 'Sikorsky Aircraft' in data/universe.csv -> LMT (Lockheed Martin Corporation); no model call.",
+      "resolved_at": "2026-09-01T23:40:25+00:00",
+      "resolver_model": "deterministic",
+      "llm_cache_key": null,
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Sikorsky Aircraft Corp.",
+        "Sikorsky Aircraft Corporation"
+      ]
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "case_id": "4586879-army-idiq-pool-seven",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "Seven-company $160M USACE Louisville design-bid-build pool",
+  "why": "The canonical multi-award pool. One paragraph, seven companies, seven contract numbers, ONE shared ceiling. Naive extraction produces either one row or seven rows each carrying a divided amount; both are wrong and both corrupt every downstream revenue read.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "checks": [
+    {
+      "id": "seven-rows",
+      "kind": "count",
+      "select": {"contract_number": {"in": ["W912QR-26-D-A044", "W912QR-26-D-A045", "W912QR-26-D-A046", "W912QR-26-D-A047", "W912QR-26-D-A048", "W912QR-26-D-A049", "W912QR-26-D-A050"]}},
+      "expect": 7,
+      "quote": "AAECON General Contracting LLC,* Louisville, Kentucky (W912QR-26-D-A044); Amerifield LLC,* Berlin, Connecticut (W912QR-26-D-A045); Huot Construction and Services Inc.,* South Saint Paul, Minnesota (W912QR-26-D-A046); Red Eagle 3 JV,* Coweta, Oklahoma (W912QR-26-D-A047); Semper Tek Inc.,* Lexington, Kentucky (W912QR-26-D-A048); Valiant Construction LLC,* Louisville, Kentucky (W912QR-26-D-A049); and Tri Coast-Pac Tech JV 2,* Kelso, Washington (W912QR-26-D-A050), will compete for each order of the $160,000,000 firm-fixed-price contract for design-bid-build construction services.",
+      "reason": "Seven company names, each with its own contract number, in one paragraph."
+    },
+    {
+      "id": "a044-aaecon",
+      "kind": "row",
+      "select": {"contract_number": "W912QR-26-D-A044"},
+      "expect": {
+        "contractor_raw": "AAECON General Contracting LLC,*",
+        "contractor_city": "Louisville",
+        "contractor_state": "Kentucky",
+        "service_branch": "ARMY",
+        "amount_usd": 160000000,
+        "is_multi_award": true,
+        "small_business": true
+      },
+      "quote": "AAECON General Contracting LLC,* Louisville, Kentucky (W912QR-26-D-A044); ... will compete for each order of the $160,000,000 firm-fixed-price contract",
+      "reason": "amount_usd is the SHARED ceiling printed once for the whole pool -- 160000000 on every row, never 160000000/7."
+    },
+    {
+      "id": "a048-semper-tek-asterisk-kept",
+      "kind": "row",
+      "select": {"contract_number": "W912QR-26-D-A048"},
+      "expect": {
+        "contractor_raw": "Semper Tek Inc.,*",
+        "contractor_city": "Lexington",
+        "contractor_state": "Kentucky",
+        "amount_usd": 160000000,
+        "is_multi_award": true,
+        "small_business": true
+      },
+      "quote": "Semper Tek Inc.,* Lexington, Kentucky (W912QR-26-D-A048)",
+      "reason": "contractor_raw is the name exactly as printed, asterisk and comma included. Entity resolution is a different agent's job and it needs the raw string."
+    },
+    {
+      "id": "a050-tri-coast-last-in-pool",
+      "kind": "row",
+      "select": {"contract_number": "W912QR-26-D-A050"},
+      "expect": {
+        "contractor_raw": "Tri Coast-Pac Tech JV 2,*",
+        "contractor_city": "Kelso",
+        "contractor_state": "Washington",
+        "amount_usd": 160000000,
+        "is_multi_award": true,
+        "small_business": true
+      },
+      "quote": "and Tri Coast-Pac Tech JV 2,* Kelso, Washington (W912QR-26-D-A050), will compete for each order of the $160,000,000 firm-fixed-price contract",
+      "reason": "The last awardee is the one a paragraph-splitting extractor most often merges into the shared tail of the sentence."
+    },
+    {
+      "id": "every-pool-row-carries-full-ceiling",
+      "kind": "count",
+      "select": {"contract_number": {"startswith": "W912QR-26-D-A0"}, "amount_usd": 160000000},
+      "expect": 7,
+      "quote": "will compete for each order of the $160,000,000 firm-fixed-price contract for design-bid-build construction services.",
+      "reason": "One ceiling, stated once, shared by all seven. Any per-company division shows up here as a count below 7."
+    },
+    {
+      "id": "pool-bid-counts",
+      "kind": "row",
+      "select": {"contract_number": "W912QR-26-D-A046"},
+      "expect": {"bids_solicited": null, "bids_received": 19},
+      "quote": "Bids were solicited via the internet with 19 received.",
+      "reason": "The number solicited is genuinely not stated. It must stay null, not become 0 and not be back-inferred from 19."
+    }
+  ]
+}

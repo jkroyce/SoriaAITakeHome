@@ -1,0 +1,79 @@
+{
+  "case_id": "4586879-small-business-asterisks",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "The asterisk marker: 14 asterisked contractors, and a footnote that is not an award",
+  "why": "The `*` is the only signal for small-business status and it is attached to the printed name. Two failure modes: stripping the asterisk out of contractor_raw (which breaks the raw string entity resolution keys on), and emitting the trailing `*Small business` legend as a 15th award.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "census": [
+    "Action Manufacturing Co.,*",
+    "Paligen Aerospace & Defense LLC,*",
+    "AAECON General Contracting LLC,*",
+    "Amerifield LLC,*",
+    "Huot Construction and Services Inc.,*",
+    "Red Eagle 3 JV,*",
+    "Semper Tek Inc.,*",
+    "Valiant Construction LLC,*",
+    "Tri Coast-Pac Tech JV 2,*",
+    "Argus Consulting Inc.,*",
+    "Enterprise Engineering Inc.,*",
+    "Robert and Co. Inc.,*",
+    "Aleut Construction LLC,*",
+    "Kit Masters Inc.,*"
+  ],
+  "checks": [
+    {
+      "id": "fourteen-asterisked-names",
+      "kind": "count",
+      "select": {"contractor_raw": {"contains": "*"}},
+      "expect": 14,
+      "quote_kind": "summary",
+      "quote": "The document body carries 15 asterisks. Fourteen are trailing markers on contractor names (Action Manufacturing Co.,* / Paligen Aerospace & Defense LLC,* / AAECON General Contracting LLC,* / Amerifield LLC,* / Huot Construction and Services Inc.,* / Red Eagle 3 JV,* / Semper Tek Inc.,* / Valiant Construction LLC,* / Tri Coast-Pac Tech JV 2,* / Argus Consulting Inc.,* / Enterprise Engineering Inc.,* / Robert and Co. Inc.,* / Aleut Construction LLC,* / Kit Masters Inc.,*); the fifteenth is the legend '*Small business' on the last line.",
+      "reason": "Counted by hand off the prose. See the `census` list on this case for the fourteen names."
+    },
+    {
+      "id": "fourteen-small-business-rows",
+      "kind": "count",
+      "select": {"small_business": true},
+      "expect": 14,
+      "quote": "*Small business",
+      "reason": "small_business must be exactly the asterisked set -- no more (the footnote is not an award) and no fewer (the asterisk is easy to lose inside a pool)."
+    },
+    {
+      "id": "footnote-is-not-an-award",
+      "kind": "absent",
+      "select": {"contractor_raw": {"contains": "Small business"}},
+      "quote": "*Small business",
+      "reason": "The last line of the document is a legend explaining the marker. It has no dollar figure, no contract number and no contracting activity; it is not an award."
+    },
+    {
+      "id": "asterisk-preserved-byte-for-byte",
+      "kind": "row",
+      "select": {"contract_number": "W15QKN-26-D-A084"},
+      "expect": {
+        "contractor_raw": "Action Manufacturing Co.,*",
+        "small_business": true,
+        "service_branch": "ARMY",
+        "amount_usd": 712480000
+      },
+      "quote": "Action Manufacturing Co.,* Bristol, Pennsylvania, was awarded a $712,480,000 firm-fixed-price, indefinite-delivery/indefinite-quantity contract to manufacture, inspect, test, package and deliver M739A1 point detonating/delay fuzes. ... Army Contracting Command, Newark, New Jersey, is the contracting activity (W15QKN-26-D-A084).",
+      "reason": "contractor_raw is 'Action Manufacturing Co.,*' -- comma and asterisk included, exactly as printed. Not 'Action Manufacturing Co.' and not 'Action Manufacturing Co.,'."
+    },
+    {
+      "id": "no-asterisk-means-false-not-null",
+      "kind": "row",
+      "select": {"contractor_raw": "Rockwell Collins Inc."},
+      "expect": {"small_business": false},
+      "quote": "Rockwell Collins Inc., Cedar Rapids, Iowa, was awarded a cost-plus-fixed-fee, indefinite-delivery/indefinite-quantity contract",
+      "reason": "No asterisk is a positive statement that the entry is not marked small business, not an absence of information."
+    },
+    {
+      "id": "contractor-raw-is-not-resolved-to-a-parent",
+      "kind": "absent",
+      "select": {"contractor_raw": {"contains": "RTX"}},
+      "quote": "Rockwell Collins Inc., Cedar Rapids, Iowa, was awarded a cost-plus-fixed-fee, indefinite-delivery/indefinite-quantity contract for command, control and communications integration",
+      "reason": "The prose says 'Rockwell Collins Inc.'. Mapping it to RTX is the entity resolver's job on a different table; the extractor that does it here destroys the resolver's cache key."
+    }
+  ]
+}
