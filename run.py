@@ -99,6 +99,11 @@ def task_sessions() -> int:
     return sh([PY, "scripts/export_sessions.py"])
 
 
+def task_usage() -> int:
+    """Per-agent token usage and spike detection, build-time and runtime."""
+    return sh([PY, "scripts/agent_usage.py"])
+
+
 def task_cost() -> int:
     """What the committed cache holds, and what replaying it costs (nothing)."""
     sys.path.insert(0, str(SRC))
