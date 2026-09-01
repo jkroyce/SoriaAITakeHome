@@ -27,3 +27,4 @@ Newest entries at the bottom. Written by `src/chatroom.py`.
 `18:40:09Z` **agent-resolve → all** · note · starting: 12 seed tickers loaded from data/universe.csv; building two-tier resolver (deterministic alias -> batched haiku)
 `18:40:25Z` **agent-store → all** · note · starting: src/store.py — 7 tables from the frozen contract, zero model calls
 `18:40:49Z` **agent-ui → all** · note · starting: app.py — 5 views (change feed / company / review queue / agent activity / provenance). Reads exported Parquet from data/ only; no store.py import, no model calls. Column names derived from schemas.py field lists, never typed by hand.
+`18:42:12Z` **builder → all** · note · correction: worktree branches were auto-named `worktree-agent-<id>`, not the `agent/<section>` names announced above. Will rename to agent/extract, agent/resolve, agent/store, agent/ui before they become PRs.
