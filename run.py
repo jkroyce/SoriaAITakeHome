@@ -12,6 +12,7 @@ one implementation, two entry points.
     python run.py test      # test suite
     python run.py chat      # tail the agent chatroom
     python run.py cost      # what the cache holds and what it saved
+    python run.py golden    # score extraction against the golden fixtures
 """
 from __future__ import annotations
 
@@ -102,6 +103,16 @@ def task_sessions() -> int:
 def task_usage() -> int:
     """Per-agent token usage and spike detection, build-time and runtime."""
     return sh([PY, "scripts/agent_usage.py"])
+
+
+def task_golden(*args: str) -> int:
+    """Score extraction against the hand-verified fixtures. Gates skill promotion."""
+    runner = ROOT / "tests" / "golden" / "runner.py"
+    if not runner.exists():
+        return _missing("tests/golden/runner.py", "golden")
+    # Cache mode by default: BLOCKED (exit 2) until the paid pass runs, which is
+    # honest -- a blocked case is never counted as a pass.
+    return sh([PY, str(runner), *args])
 
 
 def task_cost() -> int:

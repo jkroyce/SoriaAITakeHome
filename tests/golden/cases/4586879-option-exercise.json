@@ -1,0 +1,50 @@
+{
+  "case_id": "4586879-option-exercise",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "A modification that exercises an option",
+  "why": "The schema's action_type enum separates option_exercise from modification, and the distinction is the one an investor cares about: exercising a priced option is planned continuation, a modification is new scope. The prose calls this action a 'modification' in its first sentence and an option exercise in its second.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "caveat": "action_type here is a convention, not a fact printed in the prose: the text supports both labels and schemas.ACTION_TYPES forces a choice. This case fixes the convention (option_exercise wins when the text says an option is exercised) so that a later skill rule cannot flip it without the change being visible. The dollar figures and the identifiers in this case are plain facts from the text.",
+  "checks": [
+    {
+      "id": "kbr-wyle-option-exercise",
+      "kind": "row",
+      "select": {"contractor_raw": "KBR Wyle Services LLC"},
+      "expect": {
+        "service_branch": "NAVY",
+        "contractor_city": "Lexington Park",
+        "contractor_state": "Maryland",
+        "action_type": "option_exercise",
+        "amount_usd": 25162568,
+        "modification_number": "P00003",
+        "base_contract_number": "N0042125C1001",
+        "small_business": false
+      },
+      "quote": "KBR Wyle Services LLC, Lexington Park, Maryland, is awarded a $25,162,568 cost-plus-fixed-fee modification (P00003) to a previously awarded contract (N0042125C1001). The modification exercises an option to provide continued program management, engineering, financial, and logistics support for the F/A-18 air vehicle",
+      "reason": "'The modification exercises an option' is explicit. modification_number and base_contract_number are still filled -- an option exercise is a modification in form."
+    },
+    {
+      "id": "kbr-wyle-obligation-is-not-the-amount",
+      "kind": "absent",
+      "select": {"contractor_raw": "KBR Wyle Services LLC", "amount_usd": 23213236},
+      "quote": "FMS customer funds in the amount of $23,213,236 will be obligated at the time of the award",
+      "reason": "$23,213,236 is the obligation; the action is $25,162,568."
+    },
+    {
+      "id": "gdit-plain-modification",
+      "kind": "row",
+      "select": {"contractor_raw": "General Dynamics Information Technology Inc."},
+      "expect": {
+        "service_branch": "NAVY",
+        "action_type": "modification",
+        "amount_usd": 43874231,
+        "base_contract_number": "N6339423C0009",
+        "modification_number": null
+      },
+      "quote": "General Dynamics Information Technology Inc., Falls Church, Virginia, was awarded a $43,874,231 cost-only modification to previously awarded contract (N6339423C0009) for in-service engineering support of the MK 41 Vertical Launching System",
+      "reason": "The control for the case above: a modification with no option language and no modification number printed. action_type modification, modification_number null -- not an invented P-number."
+    }
+  ]
+}

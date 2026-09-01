@@ -1,0 +1,65 @@
+{
+  "case_id": "4585867-correction-is-not-an-award",
+  "announcement_id": "4585867",
+  "announced_date": "2026-08-28",
+  "source": "raw/articles/4585867.html",
+  "title": "A CORRECTION notice is not an award, and a second document's OTHER header",
+  "why": "A second announcement, so the set is not a single-document mirror. It contains a CORRECTION line: a dollar figure, a company, a city and a contract number, laid out exactly like an award, that announces nothing new -- it corrects the date of an award already published on Aug. 25. Emitting it as an award double-counts $31,291,904 against Lockheed Martin. It also carries a DEFENSE ADVANCED RESEARCH PROJECTS AGENCY header, a second and differently-worded header that must fall to OTHER.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "caveat": "'A correction notice is not an award' is a judgement this reviewer made from the text ('was awarded on Aug. 25, 2026, not Aug. 17, 2026' -- the award is stated to have already happened, and the sentence changes only its date). No rule in skills/extraction.md covers corrections as of R-009, so this case may well fail on the first real extraction. That is the intended use of a golden set: it states what is correct, and a failure here is the motivating case for a new rule, not evidence that the fixture is wrong.",
+  "checks": [
+    {
+      "id": "correction-line-emits-no-award",
+      "kind": "absent",
+      "select": {"contractor_raw": {"contains": "Lockheed Martin"}},
+      "quote": "CORRECTION: The $31,291,904 contract awarded to Lockheed Martin Corp., Fort Worth, Texas (FA860426DB008), was awarded on Aug. 25, 2026, not Aug. 17, 2026.",
+      "reason": "'Lockheed Martin' appears exactly once in this document, on the CORRECTION line. The award it refers to was announced earlier; this sentence changes only its date. Any Lockheed Martin row in announcement 4585867 is that correction wrongly counted as new business."
+    },
+    {
+      "id": "corrected-contract-number-emits-no-award",
+      "kind": "absent",
+      "select": {"contract_number": "FA860426DB008"},
+      "quote": "CORRECTION: The $31,291,904 contract awarded to Lockheed Martin Corp., Fort Worth, Texas (FA860426DB008), was awarded on Aug. 25, 2026, not Aug. 17, 2026.",
+      "reason": "Same check keyed on the contract number, so a row that renames the contractor is still caught."
+    },
+    {
+      "id": "darpa-header-falls-to-other",
+      "kind": "row",
+      "select": {"contract_number": "HR001126FE052"},
+      "expect": {
+        "contractor_raw": "Guidehouse Inc.",
+        "contractor_city": "McLean",
+        "contractor_state": "Virginia",
+        "service_branch": "OTHER",
+        "amount_usd": 11793452,
+        "bids_solicited": null,
+        "bids_received": 1,
+        "small_business": false
+      },
+      "quote": "DEFENSE ADVANCED RESEARCH PROJECTS AGENCY\\nGuidehouse Inc., McLean, Virginia, was awarded a $11,793,452 cost-plus-fixed-fee contract for advisory and assistance services ... This contract was a competitive acquisition under solicitation number HR001126RE001, with one offer received. Fiscal 2026 research, development, test and evaluation funds in the amount of $2,077,246 are obligated at the time of award. The Defense Advanced Research Projects Agency, Arlington, Virginia, is the contracting activity (HR001126FE052).",
+      "reason": "The header contains the word DEFENSE but is not the literal header 'DEFENSE', so it maps to OTHER. $2,077,246 is the obligation, not the amount. 'with one offer received' gives received only."
+    },
+    {
+      "id": "darpa-not-mapped-to-defense",
+      "kind": "absent",
+      "select": {"contract_number": "HR001126FE052", "service_branch": "DEFENSE"},
+      "quote": "DEFENSE ADVANCED RESEARCH PROJECTS AGENCY",
+      "reason": "schemas.BRANCHES reserves DEFENSE for a header that is literally DEFENSE. Substring-matching the enum against the header is the bug this catches."
+    },
+    {
+      "id": "telos-anchor-row",
+      "kind": "row",
+      "select": {"contract_number": "FA7037-26-D-0003"},
+      "expect": {
+        "contractor_raw": "Telos Corp.",
+        "service_branch": "AIR FORCE",
+        "amount_usd": 37777500,
+        "is_idiq": true,
+        "bids_solicited": null,
+        "bids_received": 30
+      },
+      "quote": "Telos Corp., Ashburn, Virginia has been awarded a $37,777,500 indefinite-delivery/indefinite-quantity contract to support the Air Combat Command, intelligence community, risk management, and cybersecurity. ... This contract was a competitive and 30 offers were received. Fiscal 2026 operations and maintenance funds in the amount of $3,137,460 are being obligated at time of the award. The Air Combat Command, Acquisition Management and Integration Center, Joint Base San Antonio-Lackland, Texas, is the contracting activity (FA7037-26-D-0003).",
+      "reason": "A plain single award in the second document, so this case fails loudly if 4585867 is not extracted at all rather than passing vacuously on its two absence checks."
+    }
+  ]
+}

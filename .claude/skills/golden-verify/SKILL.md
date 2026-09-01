@@ -16,9 +16,13 @@ on purpose — every case is one a human actually checked against the source pro
 
 Must include the two cases that break naive extraction:
 
-- **`4586879` (2026-08-31)** — a $160M IDIQ awarded to SEVEN companies, each with its
+- **`4586879` (2026-08-31)** — a $160M shared-ceiling pool awarded to SEVEN companies,
+  each with its
   own contract number, competing under one shared ceiling. Correct output is seven rows
   with `is_multi_award=true`, not one row and not seven separate ceilings.
+  (The prose says "will compete for each order of the $160,000,000 firm-fixed-price
+  contract" but never says indefinite-delivery/indefinite-quantity for this paragraph,
+  so `is_idiq` is NOT asserted here. The NAVFAC pool does say it, and asserts it.)
 - **`4586879` modification** — a $180M `P00002` against `W9124C-25-D-A003` with a stated
   cumulative face value of $280M. Correct output is `action_type=modification` with
   `cumulative_face_value_usd=280000000`, NOT a new $180M award. Getting this wrong

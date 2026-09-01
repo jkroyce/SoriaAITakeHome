@@ -1,0 +1,12 @@
+{
+  "4585867": {
+    "chars": 13185,
+    "sha256": "3eed84a379a8c7b1a6997ad88bbb7e1b9b8deeced260842c9bb5bbf75e9f6872",
+    "source": "raw/articles/4585867.html via fetch.body_text"
+  },
+  "4586879": {
+    "chars": 16807,
+    "sha256": "051d252d8aed1069a3035f960a146f9b6cb8c950f544ab78a6eff435458f801a",
+    "source": "raw/articles/4586879.html via fetch.body_text"
+  }
+}

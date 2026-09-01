@@ -1,0 +1,57 @@
+{
+  "case_id": "4586879-bid-counts",
+  "announcement_id": "4586879",
+  "announced_date": "2026-08-31",
+  "source": "raw/articles/4586879.html",
+  "title": "Bid counts: null is not zero, and received is not solicited",
+  "why": "Three phrasings appear in this one document. Only one of them states both numbers. Writing 0 for 'not stated', or copying the received count into the solicited count, turns a missing value into a false competitive signal -- 'one bid solicited, one received' means sole-source, and inventing it is the opposite of a truthful extraction.",
+  "verified_against": "the announcement prose, by hand. Not verified against any model output -- cache/llm/ is empty.",
+  "checks": [
+    {
+      "id": "both-stated",
+      "kind": "row",
+      "select": {"contractor_raw": "South Carolina Commission for the Blind"},
+      "expect": {"bids_solicited": 1, "bids_received": 1},
+      "quote": "One bid was solicited with one received.",
+      "reason": "Both counts are stated in words. 1 / 1."
+    },
+    {
+      "id": "solicited-not-stated-internet",
+      "kind": "row",
+      "select": {"contract_number": "W15QKN-26-D-A084"},
+      "expect": {"bids_solicited": null, "bids_received": 1},
+      "quote": "Bids were solicited via the internet with one received.",
+      "reason": "'via the internet' is a method, not a count. bids_solicited must stay null; bids_received is 1."
+    },
+    {
+      "id": "solicited-not-stated-nineteen-received",
+      "kind": "row",
+      "select": {"contract_number": "W912QR-26-D-A049"},
+      "expect": {"bids_solicited": null, "bids_received": 19},
+      "quote": "Bids were solicited via the internet with 19 received.",
+      "reason": "Same phrasing with a large received count. 19 must not be copied into bids_solicited."
+    },
+    {
+      "id": "sam-gov-offers-received",
+      "kind": "row",
+      "select": {"contract_number": "N40085-26-C-0020"},
+      "expect": {"bids_solicited": null, "bids_received": 4},
+      "quote": "This contract was competitively procured via the SAM.gov website, with four offers received. Naval Facilities Engineering Systems Command, Mid-Atlantic, Norfolk, Virginia, is the contracting activity (N40085-26-C-0020).",
+      "reason": "'four offers received' spelled out -> bids_received 4, bids_solicited null."
+    },
+    {
+      "id": "never-zero-for-not-stated",
+      "kind": "absent",
+      "select": {"bids_solicited": 0},
+      "quote": "Bids were solicited via the internet with 19 received.",
+      "reason": "No entry in this document states that zero bids were solicited. A 0 anywhere in this column means 'not stated' was written as zero."
+    },
+    {
+      "id": "never-zero-received-for-not-stated",
+      "kind": "absent",
+      "select": {"bids_received": 0},
+      "quote": "This award is the result of a sole-source acquisition.",
+      "reason": "Several entries state no bid counts at all (the Northrop Grumman sole-source task order among them). Those must be null / null, not 0 / 0."
+    }
+  ]
+}
