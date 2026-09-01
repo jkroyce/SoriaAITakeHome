@@ -1,0 +1,7 @@
+# Pinned to what was verified working on Python 3.11.
+anthropic>=1.3.0
+curl_cffi>=0.16.2      # Chrome TLS impersonation; plain requests is 403'd by Akamai
+duckdb>=1.5.5
+pandas>=3.0.0
+pyarrow
+streamlit
