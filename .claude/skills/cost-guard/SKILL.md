@@ -49,3 +49,41 @@ invalidates a cache and forces re-extraction, so price it and confirm before run
   answer. That is a design bug, not a cost problem, and it will recur every run.
 - Repeated runs that never hit cache — the prompt is carrying something volatile like a
   timestamp.
+
+## Orchestrator context discipline
+
+The runtime pipeline is designed so nothing re-reads what it already knows. The same
+rule applies to whoever is *building* it, and is much easier to violate — because the
+orchestrator's cost is invisible until you measure it.
+
+**Measured on this project:** the build orchestrator's own session cost more than all
+four section agents combined (~$20 vs ~$3 of subagent work). Not because any single
+action was expensive, but because **every turn re-reads the entire conversation**.
+Cost is context size x turn count. Inflate the context once, pay for it on every
+subsequent turn.
+
+The specific failure: loading the `update-config` skill to write three lines of JSON
+pulled **63,000 tokens** of settings schema into context permanently — more than any
+subagent used in total, for a change that was already known from a doc lookup. A
+second skill load added 19,000 more. Together, 62% of the context.
+
+Rules:
+
+1. **Do not load a large skill for a small, already-known change.** If a doc fetch or
+   a grep already answered the question, act on it. A skill is worth its context when
+   you genuinely need the procedure, not as insurance.
+2. **Keep large documents out of context.** Fetch to a file and `grep` it. A 75KB doc
+   read this way costs a few hundred tokens instead of 19,000 — and this project did
+   exactly that for the settings docs, then failed to apply it to the skill loads.
+3. **Batch turns.** Independent verification commands belong in one call. Each extra
+   turn re-reads everything before it.
+4. **Delegate heavy reading to a subagent.** A subagent's context is discarded when it
+   finishes; the orchestrator's persists for the whole session. Work that requires
+   reading a lot to produce a little is exactly what a subagent is for.
+5. **Watch prompt-cache reuse, not just totals.** `python run.py usage` reports it.
+   100% reuse means the prefix is stable. Falling reuse means something volatile —
+   a timestamp, a changing tool list — has entered the cached region, and cost will
+   climb quietly.
+
+Run `python run.py usage` before and after a heavy stretch of work. If orchestrator
+tokens are growing faster than delivered work, the fix is structural, not frugality.
