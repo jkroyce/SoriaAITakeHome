@@ -89,7 +89,21 @@ STAGE_ORDER = ("extract", "resolve_entity", "score_materiality", "validate_award
 # --- estimation constants, all heuristics, all labelled as such in the output -------
 CHARS_PER_TOKEN = 3.7                    # the divisor extract.dry_run uses
 EST_PROMPT_SCAFFOLD_CHARS = 4_400        # base instructions + skills, measured
-EST_OUTPUT_TOKENS_PER_EXTRACT = 5_500    # ~15 awards x ~24 JSON fields
+#: Output tokens per extraction, as a multiple of that document's input tokens.
+#: Measured over the first 25 live extractions rather than assumed: a flat constant
+#: cannot work here because documents range from 8 to 88 awards (2,652 to 24,873
+#: output tokens), and output is billed at 5x input, so under-counting it
+#: under-prices the whole run. Scoring the four candidates against those 25 calls:
+#:
+#:   flat 5,500 (the old guess)  mean abs err 3,061   corpus total 0.81x actual
+#:   flat 6,936 (measured mean)  mean abs err 3,284   corpus total 1.02x actual
+#:   input x 0.58 (median ratio) mean abs err 2,521   corpus total 0.83x actual
+#:   input x 0.68 (mean ratio)   mean abs err 2,655   corpus total 0.97x actual  <-
+#:
+#: input x 0.68 is the only one accurate both per document and in aggregate, and
+#: input is known exactly before the call because extract.dry_run builds the real
+#: prompt. Re-derive this from cache/llm/ if the prompt or the schema changes.
+EST_OUTPUT_PER_INPUT_EXTRACT = 0.68
 EST_INPUT_TOKENS_PER_GENERIC_CALL = 2_000
 EST_OUTPUT_TOKENS_PER_GENERIC_CALL = 800
 
@@ -336,7 +350,7 @@ class ExtractAgent:
                 tin = int((body_chars + EST_PROMPT_SCAFFOLD_CHARS) / CHARS_PER_TOKEN)
             est.calls += 1
             est.input_tokens += tin
-            est.output_tokens += EST_OUTPUT_TOKENS_PER_EXTRACT
+            est.output_tokens += int(tin * EST_OUTPUT_PER_INPUT_EXTRACT)
         if degraded:
             est.basis = (f"manifest body_chars for {degraded}/{len(items)} "
                          f"(article HTML absent; `python run.py fetch 5` restores it)")
