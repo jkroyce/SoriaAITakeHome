@@ -1162,6 +1162,26 @@ def run_golden() -> tuple[bool, str]:
     return proc.returncode == 0, tail[-1] if tail else f"exit {proc.returncode}"
 
 
+def run_golden_against(skills_file: pathlib.Path, proposed: str) -> tuple[bool, str]:
+    """Run the golden set with `skills_file` temporarily holding `proposed`.
+
+    The live file is restored in a finally block, and its original bytes are
+    re-asserted afterwards. This is the only place the live prompt is swapped,
+    it is swapped for the duration of one gate run, and a failure never leaves
+    the swap in place.
+    """
+    original = skills_file.read_text(encoding="utf-8") if skills_file.exists() else None
+    try:
+        skills_file.parent.mkdir(parents=True, exist_ok=True)
+        skills_file.write_text(proposed, encoding="utf-8")
+        return run_golden()
+    finally:
+        if original is None:
+            skills_file.unlink(missing_ok=True)
+        else:
+            skills_file.write_text(original, encoding="utf-8")
+
+
 def reextraction_cost(agent_name: str, *,
                       raw_dir: pathlib.Path | None = None) -> Estimate:
     """What promoting a rule for `agent_name` would cost.
@@ -1270,22 +1290,28 @@ def promote_skills(agent_name: str | None = None, rule_path: str | None = None,
         print("  re-verify. This run changed nothing.")
         return 0
 
-    _rule("4. apply, re-verify, revert on regression")
+    _rule("4. verify against a COPY, write the live file only once it passes")
     rc = 0
     for t, cand in candidates.items():
         agent = next(a for a in agents if a.name == t)
         skills = pathlib.Path(agent.skills_path())
         original = skills.read_text(encoding="utf-8") if skills.exists() else ""
         rule = cand.read_text(encoding="utf-8").strip()
-        skills.parent.mkdir(parents=True, exist_ok=True)
-        skills.write_text(original.rstrip() + "\n\n" + rule + "\n", encoding="utf-8")
-        after_ok, after = run_golden()
+        proposed = original.rstrip() + '\n\n' + rule + '\n'
+        # Gate the CANDIDATE, never the live file. Writing the real skills file and
+        # reverting on failure looks equivalent but is not: the skills file is part
+        # of the prompt and CachedLLM keys on the prompt, so a crash between the
+        # write and the revert leaves every cached response for this agent silently
+        # invalidated. Verify on a copy; the live file is written only once the gate
+        # is green. tests/golden/runner.py gates the same way, deliberately.
+        after_ok, after = run_golden_against(skills, proposed)
         if after_ok:
+            skills.parent.mkdir(parents=True, exist_ok=True)
+            skills.write_text(proposed, encoding="utf-8")
             print(f"  {t}: PROMOTED -- {after}")
             cand.unlink()
         else:
-            skills.write_text(original, encoding="utf-8")
-            print(f"  {t}: REVERTED -- golden regressed: {after}")
+            print(f"  {t}: REJECTED -- golden regressed: {after} (live file untouched)")
             rc = 1
     return rc
 
@@ -1468,8 +1494,19 @@ def selftest() -> int:
     fails += not _ok("resolve_entity" in names,
                      "discovery finds resolve_entity with nothing hardcoded")
     fails += not _ok("extract" in names, "extract.py is adapted onto the protocol")
-    fails += not _ok("score_materiality" not in names,
-                     "score_materiality is absent -- and that is not an error")
+    fails += not _ok("score_materiality" in names,
+                     "score_materiality registered itself -- this file was never "
+                     "edited to know about it")
+    # Absence must also be survivable. Prove it against an empty directory rather
+    # than against the real one: asserting that a particular agent is missing is a
+    # test that rots the moment the agent is written, which is exactly what
+    # happened to the version of this check written before score_materiality landed.
+    empty = tmp / "no_agents"
+    empty.mkdir(parents=True, exist_ok=True)
+    only = [a.name for a in build_registry(empty)]
+    fails += not _ok(only == ["extract"],
+                     f"an empty agents directory discovers nothing and does not "
+                     f"error; only the built-in extract adapter remains: {only}")
     ordered = sorted(names, key=lambda n: (STAGE_ORDER.index(n)
                                            if n in STAGE_ORDER else len(STAGE_ORDER), n))
     fails += not _ok(names == ordered, f"stages are in dependency order: {names}")
@@ -1598,7 +1635,11 @@ def selftest() -> int:
         created = True
     skills_file = SKILLS_DIR / "extraction.md"
     skills_before = skills_file.read_text(encoding="utf-8")
-    rc = promote_skills("extract", apply=True)
+    # apply=False: a selftest must never mutate the artifact it is testing. The
+    # skills file is part of the extraction prompt and CachedLLM keys on the
+    # prompt, so promoting here would silently invalidate every cached response
+    # -- the exact cost this gate exists to make deliberate.
+    rc = promote_skills("extract", apply=False)
     skills_after = skills_file.read_text(encoding="utf-8")
     if created:
         cand.unlink()
