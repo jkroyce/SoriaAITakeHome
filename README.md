@@ -1,135 +1,71 @@
 # DoD Contract Terminal
 
-This grabs Department of War contract announcements — which are published as prose —
-and distills them into a database you can actually query, so an investor can see what
-changed and whether it matters.
+Department of War contract announcements are published as prose. This turns them into a
+database you can query, so an investor can see what changed and whether it matters.
 
-The application first fetches the announcements, then AI agents read them in parallel
-and produce structured rows. Company names are checked against existing logic first,
-and only the ones that logic can't resolve are sent to AI.
-
-**The structure is: companies have contracts, and contracts have events that change
-their value.** Creating a contract is itself an event, so the whole thing reads as one
-log.
-
----
+It fetches the announcements, AI agents read them in parallel and produce structured
+rows, and company names are checked against existing logic before any of them are sent
+to AI. **Companies have contracts, and contracts have events that change their value** —
+creating a contract is itself an event, so the whole thing reads as one log.
 
 ## Run it
 
 ```bash
-python run.py setup      # install dependencies
-python run.py demo       # the whole pipeline from committed data — no API key, $0
-python run.py ui         # the terminal itself
+python run.py setup     # install
+python run.py demo      # the whole pipeline from committed data — no API key, $0, ~35s
+python run.py ui        # the terminal
 ```
 
-`demo` rebuilds the database from scratch using the 50 committed source documents and
-the committed model responses. It takes about 40 seconds, makes zero API calls, and
-produces:
+`demo` rebuilds from scratch using the 50 committed source documents and the committed
+model responses:
 
 ```
-50 announcements · 1,182 events · 1,128 contracts · 941 companies
-23 alerts · 155 notable · 1,004 routine
+1,182 events · 1,128 contracts · 941 companies · 23 alerts
 llm: 0 live calls, 101 cache hits, $0.0000
 ```
 
-Those are the same numbers the $1.22 paid run produced, down to which awards escalated
-to the more expensive model. Nothing is stubbed — the agents genuinely run, they just
-get their answers from cache instead of the API.
+Same numbers as the $1.22 paid run, down to which awards escalated to the expensive
+model. Nothing is stubbed — the agents genuinely run, they just read cached answers.
 
-**Want to prove it's real on your own key?**
+To prove that isn't a fixture, `python run.py trial` fetches today's announcements and
+processes one document the cache has never seen, live, capped at $0.25. Needs
+`ANTHROPIC_API_KEY` in `.env`. Nothing else here does.
 
-```bash
-echo "ANTHROPIC_API_KEY=sk-ant-..." > .env    # gitignored
-python run.py trial                            # one fresh document, live, capped at $0.25
-```
+## What I decided
 
-That fetches today's announcements and processes one document the cache has never
-seen. It's the honest answer to "is the cache just a fixture?"
+- **AI is confined to judgement.** Fetching, storage, and the UI are deterministic, and
+  so is working out *what changed* — that's a set difference, not worth paying for. The
+  AI reads prose, resolves ambiguous company names, and judges investor relevance.
+- **Names hit a dictionary before the API.** 56 of 941 contractors resolved free; every
+  name resolved once is written to `entity_map.json` and never reasoned about again.
+- **Every model response is cached by input hash, and the cache is committed.** That's
+  why `demo` costs nothing, and why tomorrow's announcement costs cents rather than a
+  full re-run.
+- **A multi-agent build**, to see what a startup would do for speed — parallel work
+  against a frozen data contract (`src/schemas.py`) so it integrated without conflicts.
+- **Heavy weight on token cost**, more than the problem needed, to keep my own usage
+  down. Batching, spend caps, and a cost estimate before anything is called.
+- **The pipeline audits itself.** `run.py diagnose` runs 11 deterministic checks over
+  what fetching and extraction produced, and calls a model only to ask *why* something
+  looks wrong. It proposes fixes and never applies them.
 
-Full run over all 50 documents is `python run.py live` (capped at $5.00).
+## Limits I set
 
----
-
-## What I decided, and why
-
-**I wanted the AI confined to judgement.** The UI, the fetching, and the storage are
-deterministic. So is working out *what changed* — that's a set difference on IDs, not
-something worth paying a model for. The AI reads prose, resolves ambiguous company
-names, and decides whether an award actually matters to an investor. Everything else
-is code.
-
-**Company names hit a dictionary before they hit the API.** Of 941 distinct
-contractors, 56 resolved for free against a known-aliases list, and every name resolved
-once is written to `data/entity_map.json` and never reasoned about again. Re-running
-the whole corpus now costs $0.
-
-**Every model response is cached by a hash of its exact input, and the cache is
-committed.** That's why `demo` works with no key. It also means the refresh cost is
-proportional to genuinely new information rather than to corpus size — tomorrow's
-announcement costs a few cents, not another full run.
-
-**I used a multi-agent flow to build it**, to see what a startup would do for speed.
-Sections were built in parallel against a frozen data contract (`src/schemas.py`) so
-they could integrate without merge conflicts in data form.
-
-**I put a lot of weight on token cost and monitoring**, more than the problem strictly
-needed, because I wanted to keep my own usage down. That added complexity — batching,
-spend caps, a cost estimate before anything is called — but it's the constraint I
-chose.
-
----
-
-## The pipeline checks its own work
-
-`src/agents/diagnose.py` reads what the fetching and extraction actually produced and
-asks whether the *code* is wrong. Eleven deterministic checks find symptoms — documents
-that returned no text, modifications naming no contract, amounts that cannot be right —
-and only when something fires does a model get asked the question a threshold can't
-answer: is this the source changing shape, a gap in the extraction rules, something the
-schema can't express, or just messy source text?
-
-It **proposes** fixes and never applies them. It can suggest a rule for
-`skills/extraction.md`, which then has to survive the golden tests. It cannot touch the
-schema or any other source file — it writes a proposal to `data/diagnosis/` and flags a
-human. It's judging the output of the code it would be editing, so an auto-applied
-wrong diagnosis would erase its own evidence.
-
-```bash
-python run.py diagnose    # run the checks, print findings — free, no API key
-```
-
-On the current corpus it finds 5 things, including 3 modifications that name no
-contract to modify (a violation of the extractor's own rule R-002) and 15 awards with
-no dollar amount.
-
----
-
-## Limits I set to avoid scope creep
-
-- No second AI verification layer over the extraction.
-- No real tooling for reporting or working through low-confidence entries — they're
-  detected and queued (23 of them), but a human would have to go read the queue.
-- 50 weekdays of announcements. Most modifications reference contracts awarded years
-  earlier, so ~93% of them have no parent in the window. The system says so
-  (`history_complete = false`) rather than pretending the contract starts at zero.
-
----
+- No second AI verification layer over extraction.
+- Low-confidence entries are detected and queued (23), but there's no tooling to work
+  through the queue.
+- 50 weekdays. Most modifications reference contracts awarded years earlier, so ~93%
+  have no parent in the window — flagged as `history_complete = false` rather than
+  pretending the contract starts at zero.
 
 ## Layout
 
-| Path | What it is |
+| Path | What |
 |---|---|
-| `src/schemas.py` | The data contract. One field list generates both the JSON schema sent to the model and the DuckDB DDL. |
-| `src/fetch.py` | Acquisition. war.gov fingerprints the TLS handshake, so this uses `curl_cffi`. |
-| `src/agents/` | Four agents: extract, resolve entity, score materiality, and diagnose. |
-| `src/manager.py` | Orchestration, spend caps, change detection, contract aggregation. |
-| `app.py` | The Streamlit terminal. |
+| `src/schemas.py` | The contract. One field list generates the model's JSON schema *and* the DuckDB DDL. |
+| `src/agents/` | extract, resolve entity, score materiality, diagnose |
+| `src/manager.py` | Orchestration, spend caps, change detection, contract aggregation |
 | `cache/llm/` | Every model response, keyed by input hash. Committed on purpose. |
-| `skills/` | Rules the agents wrote for themselves after getting cases wrong. |
-| `tests/golden/` | Hand-verified fixtures that gate whether a new rule is accepted. |
+| `skills/` | Rules the agents wrote for themselves, gated by `tests/golden/` |
 
-```bash
-python run.py test       # 72 tests
-python run.py golden     # extraction scored against hand-verified fixtures
-python run.py cost       # what the cache holds and what it saved
-```
+`python run.py test` (72 tests) · `golden` · `cost` · `diagnose`
