@@ -6,7 +6,8 @@ this was built on, and a task runner you cannot run is just documentation. The
 Makefile delegates here so `make demo` still works for anyone on macOS or Linux --
 one implementation, two entry points.
 
-    python run.py demo      # replay everything from the committed cache, no API key
+    python run.py demo      # rebuild everything from the committed cache, no API key
+    python run.py trial     # prove it live on your own key, capped at $0.25
     python run.py tick      # one refresh cycle
     python run.py ui        # Streamlit
     python run.py test      # test suite
@@ -70,18 +71,49 @@ def task_contract() -> int:
 
 
 def task_demo() -> int:
-    """The reviewer's two-minute path: full pipeline, from cache, no API key, $0.
+    """The reviewer's path: the whole pipeline from committed inputs. No key, $0.
 
-    Every model response is cached by input hash and committed, so this replays the
-    agent pipeline exactly without calling anything.
+    `--rebuild` deletes the database first, on purpose. Replaying onto a warm database
+    proves nothing -- every stage correctly finds no work and the run reports zeroes.
+    Starting cold makes the model responses in cache/llm/ actually do the work, so the
+    1,182 awards and 1,128 contracts you end up with are reconstructed rather than
+    read back, and the $0.00 in the footer is the claim being demonstrated.
     """
     if not (SRC / "manager.py").exists():
         return _missing("src/manager.py", "demo")
-    return sh([PY, "-m", "src.manager", "tick", "--offline"])
+    return sh([PY, "-m", "src.manager", "tick", "--offline", "--rebuild"])
+
+
+def task_trial() -> int:
+    """Prove it is real, on your own key, for about a nickel.
+
+    The honest question about a committed cache is whether it is a fixture -- whether
+    the thing would still work against text it has never seen. This answers it: fetch
+    today's announcements, take ONE document that is genuinely not in the cache, and
+    run it live. Capped at $0.25 and one document, so a reviewer can satisfy their
+    curiosity without thinking about the bill.
+
+    Needs ANTHROPIC_API_KEY. Everything else the repo does runs without one.
+    """
+    if not (SRC / "manager.py").exists():
+        return _missing("src/manager.py", "trial")
+    if not (os.environ.get("ANTHROPIC_API_KEY") or (ROOT / ".env").exists()):
+        print("trial needs an API key. Set ANTHROPIC_API_KEY, or put it in .env "
+              "(gitignored):")
+        print('    echo "ANTHROPIC_API_KEY=sk-ant-..." > .env')
+        print("Nothing was called and nothing was spent.")
+        return 2
+    print("Fetching the latest index page, then processing ONE new document live.")
+    print("Capped at $0.25. Anything already cached is free and will not be re-called.")
+    rc = sh([PY, str(SRC / "fetch.py"), "1"])
+    if rc != 0:
+        return rc
+    return sh([PY, "-m", "src.manager", "tick", "--live",
+               "--limit", "1", "--max-spend", "0.25"])
 
 
 def task_live() -> int:
-    """Same pipeline, permitted to call the API for genuinely new inputs only."""
+    """The full pipeline, permitted to call the API for genuinely new inputs only."""
     if not (SRC / "manager.py").exists():
         return _missing("src/manager.py", "live")
     return sh([PY, "-m", "src.manager", "tick", "--live", "--max-spend", "5.00"])

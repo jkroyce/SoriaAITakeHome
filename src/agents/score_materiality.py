@@ -754,16 +754,22 @@ def _review_item(row: dict, award: dict, confidence: float, reason: str) -> dict
 
 
 def _run_batches(queue: list[dict], llm, model: str, system: str, batch_size: int,
-                 ctx: dict[str, dict]
+                 ctx: dict[str, dict], on_batch=None
                  ) -> tuple[dict[str, dict], dict[str, float], list[str]]:
     """Score awards on `model`. One call per BATCH -- never one per award.
 
     Returns (uid -> row, uid -> confidence, pending uids).
+
+    `on_batch(chunk, rows)` fires after EVERY batch -- success, replay miss and failure
+    alike -- so a caller can report progress and persist partial results mid-queue. It
+    fires in a `finally` because a failed batch still advanced the queue, and a raising
+    callback is reported and swallowed rather than discarding paid work.
     """
     rows: dict[str, dict] = {}
     confs: dict[str, float] = {}
     pending: list[str] = []
-    for chunk in batches(queue, batch_size):
+
+    def _one(chunk: list[dict]) -> None:
         prompt = build_prompt(chunk, ctx)
         schema = batch_schema()
         max_tokens = _max_tokens(len(chunk))
@@ -781,14 +787,14 @@ def _run_batches(queue: list[dict], llm, model: str, system: str, batch_size: in
                 rows[a["award_uid"]], confs[a["award_uid"]] = _placeholder(
                     a, model, cache_key,
                     f"unscored: no cached call ({cache_key[:12]}); needs a live run")
-            continue
+            return
         except Exception as exc:                   # a bad batch must not sink the rest
             sys.stderr.write(f"! tier 2 call failed ({type(exc).__name__}: {exc})\n")
             for a in chunk:
                 pending.append(a["award_uid"])
                 rows[a["award_uid"]], confs[a["award_uid"]] = _placeholder(
                     a, model, cache_key, f"call failed: {type(exc).__name__}: {exc}")
-            continue
+            return
 
         aligned = _align((got or {}).get("scores") or [], chunk)
         for a in chunk:
@@ -800,13 +806,30 @@ def _run_batches(queue: list[dict], llm, model: str, system: str, batch_size: in
                     a, model, cache_key, "model returned no entry for this award")
                 continue
             rows[uid], confs[uid] = _coerce(item, a, model, cache_key)
+
+    for chunk in batches(queue, batch_size):
+        try:
+            _one(chunk)
+        finally:
+            if on_batch is not None:
+                try:
+                    on_batch(chunk, rows)
+                except Exception as exc:
+                    sys.stderr.write(f"! on_batch failed: {type(exc).__name__}: {exc}\n")
     return rows, confs, pending
 
 
 def score(awards, llm, *, model: str | None = None, escalate_model: str | None = None,
           escalation: bool = True, entities: dict | None = None,
-          batch_size: int = BATCH_SIZE) -> ScoreResult:
-    """Pre-filter, batch-score the remainder, escalate the unsure, route the hopeless."""
+          batch_size: int = BATCH_SIZE, on_progress=None) -> ScoreResult:
+    """Pre-filter, batch-score the remainder, escalate the unsure, route the hopeless.
+
+    `on_progress(done, total, rows)` is optional and reports the tier-2 pass batch by
+    batch with real `materiality` rows the caller can persist immediately. `total` is
+    the size of the tier-2 QUEUE, not of `awards`: the deterministic pre-filter has
+    already answered the rest for free and there is no progress to report on work that
+    never happens.
+    """
     model = model or BULK_MODEL
     escalate_model = escalate_model or JUDGE_MODEL
     awards = [a for a in awards if a and a.get("award_uid")]
@@ -827,8 +850,19 @@ def score(awards, llm, *, model: str | None = None, escalate_model: str | None =
     rows: dict[str, dict] = dict(filtered)
     confs: dict[str, float] = {u: 1.0 for u in filtered}        # deterministic == certain
 
+    _done = 0
+
+    def _report(chunk: list[dict], so_far: dict[str, dict]) -> None:
+        nonlocal _done
+        _done += len(chunk)
+        if on_progress is None:
+            return
+        got = [r for a in chunk if (r := so_far.get(a["award_uid"])) is not None]
+        on_progress(min(_done, len(queue)), len(queue), got)
+
     system = build_system()
-    scored, sconfs, pending = _run_batches(queue, llm, model, system, batch_size, ctx)
+    scored, sconfs, pending = _run_batches(queue, llm, model, system, batch_size, ctx,
+                                           on_batch=_report)
     rows.update(scored)
     confs.update(sconfs)
 
@@ -903,6 +937,10 @@ class ScoreMaterialityAgent:
     """name / detects(conn) / run(items, llm) / skills_path() -- nothing else needed."""
 
     name = "score_materiality"
+
+    #: Batches 20 awards per call, so the manager must NOT chunk it. Progress comes
+    #: from inside `run()` instead -- see score()'s `on_progress`.
+    supports_progress = True
 
     def skills_path(self) -> pathlib.Path:
         return SKILLS_PATH
@@ -1143,13 +1181,33 @@ def _check_repo_invariants() -> int:
     root = config.ROOT
     fails = 0
 
-    out = subprocess.run(["git", "diff", "main", "--", "src/schemas.py"],
+    # The contract may be unfrozen by the project owner (see its CHANGES log), so the
+    # invariant worth guarding is not "never changed" -- it is that no local change has
+    # altered a PROMPT, because that silently invalidates the committed cache and forces
+    # re-extraction at real cost. Compare the prompt projection against `main`.
+    out = subprocess.run(["git", "show", "main:src/schemas.py"],
                          capture_output=True, text=True, cwd=root)
     if out.returncode != 0:
-        print(f"  (git diff unavailable: {out.stderr.strip()[:120]})")
+        print(f"  (no `main` to compare the contract against: "
+              f"{out.stderr.strip()[:100]})")
     else:
-        fails += not _ok(out.stdout.strip() == "",
-                         "git diff main -- src/schemas.py is empty (contract frozen)")
+        import types
+        ref = types.ModuleType("_schemas_main")
+        # dataclasses resolves a class's module through sys.modules, so a synthetic
+        # module must be registered there before `@dataclass` in the contract runs.
+        sys.modules["_schemas_main"] = ref
+        try:
+            exec(compile(out.stdout, "main:src/schemas.py", "exec"), ref.__dict__)
+            same = all(
+                ref.object_schema(getattr(ref, n)) == schemas.object_schema(getattr(schemas, n))
+                for n in ("AWARD_FIELDS", "ENTITY_FIELDS", "MATERIALITY_FIELDS"))
+            fails += not _ok(same, "no contract edit changed a prompt schema "
+                                   "(the committed cache still replays)")
+        except Exception as exc:
+            fails += not _ok(False, f"could not compare contracts: "
+                                    f"{type(exc).__name__}: {exc}")
+        finally:
+            sys.modules.pop("_schemas_main", None)
 
     # The SDK name is assembled from parts so a reviewer grepping src/ for the
     # forbidden import still matches src/llm.py and nothing else -- not even this file.

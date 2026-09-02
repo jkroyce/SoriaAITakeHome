@@ -9,11 +9,18 @@ __pycache__/
 # local TLS workaround (machine-specific, not part of the deliverable)
 certs/
 
-# Raw HTML is large and regenerable via `make fetch`. The provenance sidecars
-# (*.prov.json) ARE committed -- they are the audit trail: url, fetched_at, sha256.
+# Article HTML IS committed (6.4 MB). It was excluded as "regenerable via make
+# fetch", but that is only true with network access and the TLS impersonation
+# war.gov requires -- and the announcements are replaced over time, so a fetch
+# months from now returns different documents. Without these files `make demo`
+# has nothing to extract from, and the run that the model cache replays could not
+# be reproduced. They are the inputs the committed cache is keyed against.
+#
+# Index and feed HTML stay out: they are navigation, not evidence, and nothing
+# downstream reads them. The provenance sidecars (*.prov.json) are committed too --
+# url, fetched_at, sha256 for every document.
 raw/*.html
 raw/index/*.html
-raw/articles/*.html
 raw/*.xml
 
 # duckdb is a build product; exports are committed instead

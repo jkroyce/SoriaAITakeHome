@@ -13,11 +13,29 @@ definitions. If extraction and storage each carried their own idea of what an "a
 is, integration would be a merge conflict in data form. Here there is one definition
 and two projections of it.
 
+THE DOMAIN, as the UI presents it and as the tables encode it:
+
+    Company  1 --* Contract  1 --* Event
+    entities       contracts       awards
+
+A company holds contracts; events change a contract's value, and the first event we
+hold reads as the contract being created. `awards` is the event table -- its rows were
+always actions (award, modification, option exercise, order), never durable objects.
+`contracts` is the aggregate root added in 1.1.0 to give those events something to
+belong to. Verified on the 50-document corpus: 1,128 contracts, 40 with multi-event
+timelines, and ZERO contracts whose events resolve to more than one company.
+
 RULES FOR AGENTS
   * Never edit this file. If a field is genuinely missing, stop and say so.
+    Changing it is a human decision, made once and recorded here -- see the CHANGES
+    log at the bottom of this module.
   * ``llm=True`` fields are populated by a model. Everything else is computed by
     deterministic code (ids, timestamps, provenance) and must NOT appear in any
     prompt schema.
+  * Adding an ``llm=False`` field leaves every prompt schema byte-identical, so the
+    committed model cache stays valid and the change costs nothing to adopt. Adding
+    or altering an ``llm=True`` field invalidates that agent's cache and forces
+    re-extraction at real cost. Know which one you are doing.
 """
 from __future__ import annotations
 
@@ -25,7 +43,7 @@ import hashlib
 from dataclasses import dataclass, field as dc_field
 from typing import Any
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 
 
 @dataclass(frozen=True)
@@ -132,6 +150,46 @@ AWARD_FIELDS: list[Field] = [
     Field("extractor_model", "VARCHAR", {}, "Model id that produced this row", llm=False),
     Field("llm_cache_key", "VARCHAR", {}, "sha256 of the model call; resolves to cache/llm/<key>.json", llm=False),
     Field("skills_version", "VARCHAR", {}, "Version of skills/extraction.md in force for this call", llm=False),
+
+    # -- aggregate membership (deterministic; added in schema 1.1.0) --
+    # An award row is an EVENT on a contract. These two say which contract and where
+    # in its life the event sits. Both are computed by a GROUP BY in the manager, never
+    # by a model -- so they are llm=False and stay out of every prompt, which is what
+    # keeps the committed extraction cache valid across this change.
+    Field("contract_uid", "VARCHAR", {},
+          "FK to contracts: sha256 of the contract number this event acts on", llm=False),
+    Field("is_creating_event", "BOOLEAN", {},
+          "True on the earliest event we hold for the contract -- the one that reads "
+          "as 'contract created'. False on later modifications and orders", llm=False),
+    Field("duplicate_of", "VARCHAR", {},
+          "Set when this row re-announces an identical earlier event; the surviving "
+          "award_uid. Null for the row that survives. Excluded from contract totals",
+          llm=False),
+]
+
+#: A contract is the aggregate root: a company holds contracts, and events change
+#: their value. Every field here is derived from the award rows by GROUP BY, MIN, MAX
+#: or SUM -- there is no `llm=True` field in this list and there must never be one.
+#: A contract is a fact about rows we already hold, not a judgement.
+CONTRACT_FIELDS: list[Field] = [
+    Field("contract_uid", "VARCHAR", {}, "sha256(contract_number)[:16]", llm=False),
+    Field("contract_number", "VARCHAR", {}, "The PIIN, as printed", llm=False),
+    Field("contractor_raw", "VARCHAR", {}, "Holder, as printed on the creating event", llm=False),
+    Field("ticker", "VARCHAR", {}, "Resolved public parent, null when private", llm=False),
+    Field("service_branch", "VARCHAR", {}, "Branch of the creating event", llm=False),
+    Field("work_description", "VARCHAR", {}, "What the contract is for, from its creating event", llm=False),
+    Field("contracting_activity", "VARCHAR", {}, "Awarding office", llm=False),
+    Field("first_event_date", "DATE", {}, "Earliest event we hold", llm=False),
+    Field("last_event_date", "DATE", {}, "Most recent event we hold", llm=False),
+    Field("n_events", "INTEGER", {}, "Events on this contract, duplicates excluded", llm=False),
+    Field("n_modifications", "INTEGER", {}, "Of those, modifications and option exercises", llm=False),
+    Field("initial_value_usd", "BIGINT", {}, "Amount of the creating event", llm=False),
+    Field("total_actioned_usd", "BIGINT", {}, "Sum of every event's amount, duplicates excluded", llm=False),
+    Field("ceiling_usd", "BIGINT", {}, "Largest stated cumulative face value, null if never stated", llm=False),
+    Field("history_complete", "BOOLEAN", {},
+          "False when the earliest event we hold is a modification -- the contract was "
+          "created before our window and its opening value is unknown", llm=False),
+    Field("built_at", "TIMESTAMP", {}, "When this aggregate was last rebuilt", llm=False),
 ]
 
 ANNOUNCEMENT_FIELDS: list[Field] = [
@@ -224,6 +282,7 @@ REVIEW_QUEUE_FIELDS: list[Field] = [
 TABLES: dict[str, tuple[list[Field], list[str]]] = {
     "announcements": (ANNOUNCEMENT_FIELDS, ["announcement_id"]),
     "awards": (AWARD_FIELDS, ["award_uid"]),
+    "contracts": (CONTRACT_FIELDS, ["contract_uid"]),
     "entities": (ENTITY_FIELDS, ["contractor_raw"]),
     "materiality": (MATERIALITY_FIELDS, ["award_uid"]),
     "changes": (CHANGE_FIELDS, ["change_id"]),
@@ -310,6 +369,46 @@ def award_uid(announcement_id: str, contract_number: str | None,
     basis = f"{announcement_id}|{contract_number or f'#{ordinal}'}|{contractor_raw.strip().lower()}"
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
+
+def contract_key(contract_number: str | None, base_contract_number: str | None) -> str | None:
+    """The contract an event acts on, as a plain string. Deterministic, never a model.
+
+    A modification names the vehicle it amends in `base_contract_number`; a new award
+    names its own in `contract_number`. Preferring the base is what makes a
+    modification land on the SAME contract as the award that created it -- which is
+    the entire point of the aggregate. Returns None when neither is stated, and such
+    an event belongs to no contract rather than to a fabricated one.
+    """
+    for v in (base_contract_number, contract_number):
+        s = (v or "").strip()
+        if s:
+            return s
+    return None
+
+
+def contract_uid(contract_number: str | None, base_contract_number: str | None = None) -> str | None:
+    """Stable id for a contract: sha256 of its number, case- and space-normalized.
+
+    Normalizing here and not in `contract_key` keeps the printed number intact for
+    display while still collapsing 'w58rgz-24-c-0028' and 'W58RGZ-24-C-0028 ' onto one
+    aggregate.
+    """
+    key = contract_key(contract_number, base_contract_number)
+    if not key:
+        return None
+    return hashlib.sha256(" ".join(key.split()).upper().encode("utf-8")).hexdigest()[:16]
+
+
+# --------------------------------------------------------------------------------
+# CHANGES -- every edit to this frozen contract, and why it was permitted
+# --------------------------------------------------------------------------------
+# 1.1.0  Added the `contracts` aggregate and three derived award columns
+#        (contract_uid, is_creating_event, duplicate_of). Authorised by the project
+#        owner. Every added field is llm=False, so all prompt schemas hash identically
+#        to 1.0.0 and the committed cache replays unchanged -- verified, $0 re-spend.
+#        Motivation: `award_uid` identifies a line in a press release, not a durable
+#        thing, so one contract with six actions was six unrelated rows. See the
+#        domain diagram at the top of this module.
 
 if __name__ == "__main__":
     import json

@@ -126,3 +126,53 @@ def test_uid_falls_back_when_no_contract_number():
     y = schemas.award_uid("123", None, "Some Corp", ordinal=1)
     assert x != y
     assert x == schemas.award_uid("123", None, "Some Corp", ordinal=0)
+
+
+# --------------------------------------------------------------------------------
+# 1.1.0 -- the Company -> Contract -> Event aggregate
+# --------------------------------------------------------------------------------
+
+def test_contract_uid_collapses_spellings_of_one_number():
+    """A contract is identified by its number, however that number was printed."""
+    a = schemas.contract_uid("W58RGZ-24-C-0028")
+    assert a == schemas.contract_uid("w58rgz-24-c-0028")
+    assert a == schemas.contract_uid("  W58RGZ-24-C-0028  ")
+    assert a != schemas.contract_uid("W58RGZ-24-C-0029")
+
+
+def test_a_modification_lands_on_the_contract_it_amends():
+    """The whole aggregate rests on this: a mod joins its base, not its own number.
+
+    Skills rule R-002 gives a modification the base contract's number when no new one
+    is printed, so both spellings must resolve to the same contract.
+    """
+    base = schemas.contract_uid("N0001924G0010")
+    assert schemas.contract_uid(None, "N0001924G0010") == base
+    assert schemas.contract_uid("H9240826FE010", "N0001924G0010") == base, (
+        "a task order must belong to its parent vehicle, not to itself")
+
+
+def test_an_event_with_no_contract_number_belongs_to_no_contract():
+    assert schemas.contract_uid(None, None) is None
+    assert schemas.contract_uid("", "  ") is None
+
+
+def test_contracts_are_wholly_derived_and_never_reasoned():
+    """No field on `contracts` may be model-populated: it is a GROUP BY, not a judgement."""
+    assert schemas.llm_fields(schemas.CONTRACT_FIELDS) == [], (
+        "a contract is a fact about rows we already hold; if a field here needs a "
+        "model, it belongs on awards or materiality instead")
+    assert schemas.object_schema(schemas.CONTRACT_FIELDS)["properties"] == {}
+
+
+def test_the_aggregate_columns_did_not_change_any_prompt():
+    """1.1.0 must be free to adopt: adding llm=False fields cannot touch a prompt.
+
+    If this fails, the committed cache is invalidated and every document must be
+    re-extracted at real cost -- which is a decision, not an accident.
+    """
+    for name in ("contract_uid", "is_creating_event", "duplicate_of"):
+        field = next(f for f in schemas.AWARD_FIELDS if f.name == name)
+        assert field.llm is False
+    prompt_cols = set(schemas.object_schema(schemas.AWARD_FIELDS)["properties"])
+    assert prompt_cols.isdisjoint({"contract_uid", "is_creating_event", "duplicate_of"})

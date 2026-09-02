@@ -606,12 +606,24 @@ def survey(conn, *, use_rss: bool = False,
     )
 
 
-def detect_changes(conn, before: Mapping[str, set], after: Mapping[str, set]) -> list[dict]:
-    """`changes` rows for everything that appeared during this tick.
+def detect_changes(conn, before: Mapping[str, set], after: Mapping[str, set],
+                   before_values: Mapping[str, dict] | None = None) -> list[dict]:
+    """`changes` rows for everything that appeared OR moved during this tick.
 
     A set difference per entity type, then a deterministic id per event so a re-run
     converges instead of appending duplicates. No model is consulted about whether a
     change occurred; whether it *matters* is score_materiality's job.
+
+    Five event types, all deterministic:
+
+        new_announcement         a document id we had not seen        set difference
+        new_award                an award uid we had not seen         set difference
+        modification_on_tracked  money moved on a contract we hold    join
+        amount_changed           an award's own figure moved          dict compare
+        rescored                 materiality re-banded an award       dict compare
+
+    `before_values` comes from `_value_snapshot` taken before the agents ran; without
+    it the last two are skipped rather than guessed at.
     """
     scores = {r["award_uid"]: r["score"] for r in
               store.query(conn, "SELECT award_uid, score FROM materiality")}
@@ -637,7 +649,133 @@ def detect_changes(conn, before: Mapping[str, set], after: Mapping[str, set]) ->
                      "announcement_id": meta.get("announcement_id"), "award_uid": uid,
                      "ticker": tickers.get(meta.get("contractor_raw")),
                      "materiality_score": scores.get(uid)})
+
+    rows.extend(_linked_modifications(conn, detected, blank, scores, tickers))
+    rows.extend(_value_changes(conn, detected, blank, scores, tickers,
+                               award_meta, before_values))
     return rows
+
+
+#: A modification lands on a contract we already hold when the contract has an EARLIER
+#: event -- that is, when this event is not the creating one. Since `build_contracts`
+#: already stamped `contract_uid` and `is_creating_event`, this is a filter over the
+#: aggregate rather than a self-join of awards against itself.
+#:
+#: The self-join it replaces needed a direction rule (skills rule R-002 gives a
+#: modification the base contract's own number, so two modifications matched each
+#: other) and a QUALIFY tie-break (re-announcements meant one modification matched two
+#: bases, and `prev_value` depended on row order). Both classes of bug are structurally
+#: impossible here: membership of an aggregate is a stamped column, not a match.
+_LINKED_MODS_SQL = """
+SELECT a.award_uid, a.announcement_id, a.contractor_raw, a.action_type,
+       a.amount_usd, a.cumulative_face_value_usd,
+       c.contract_number, c.n_events, c.first_event_date, c.ceiling_usd,
+       c.total_actioned_usd, c.history_complete
+  FROM awards a
+  JOIN contracts c USING (contract_uid)
+ WHERE a.duplicate_of IS NULL
+   AND a.is_creating_event = FALSE
+   AND a.action_type IN ('modification', 'option_exercise')
+"""
+
+
+def _linked_modifications(conn, detected, blank, scores, tickers) -> list[dict]:
+    """Money moved on a contract we already hold. A filter over the aggregate.
+
+    This is the event the product exists for: not "a contract was announced" but
+    "something you hold just changed value". It fires across DOCUMENTS, not only across
+    ticks -- a modification announced in August against a June contract is the same
+    signal whether both arrived in one backfill or a day apart -- and `change_id` is
+    derived from the event, so re-running converges instead of duplicating.
+    """
+    try:
+        linked = store.query(conn, _LINKED_MODS_SQL)
+    except Exception as exc:
+        sys.stderr.write(f"! linked-modification scan failed: "
+                         f"{type(exc).__name__}: {exc}" + chr(10))
+        return []
+
+    out: list[dict] = []
+    for r in linked:
+        uid = str(r["award_uid"])
+        prior = (r.get("n_events") or 1) - 1
+        was = (f"{r['contract_number']} · {prior} prior event(s) "
+               f"since {r['first_event_date']}")
+        if not r.get("history_complete"):
+            was += " · opens before our window"
+        now = _usd(r.get("amount_usd")) + " this action"
+        if r.get("cumulative_face_value_usd") is not None:
+            now += f", cumulative {_usd(r['cumulative_face_value_usd'])}"
+        elif r.get("total_actioned_usd") is not None:
+            now += f", {_usd(r['total_actioned_usd'])} actioned to date"
+        out.append({**blank, "change_id": _uid("modification_on_tracked", uid),
+                    "detected_at": detected, "change_type": "modification_on_tracked",
+                    "announcement_id": r.get("announcement_id"), "award_uid": uid,
+                    "ticker": tickers.get(r.get("contractor_raw")),
+                    "prev_value": was, "new_value": now,
+                    "materiality_score": scores.get(uid)})
+    return out
+
+
+def _value_changes(conn, detected, blank, scores, tickers, award_meta,
+                   before_values) -> list[dict]:
+    """Awards whose numbers moved, and awards materiality re-scored, since last tick.
+
+    These are the two events `changes.prev_value` / `new_value` were designed for and
+    that nothing previously wrote. Both are dict comparisons over a snapshot taken
+    before the agents ran. `change_id` folds in the old and new value so a genuine
+    second move is its own event rather than silently overwriting the first.
+    """
+    if not before_values:
+        return []
+    out: list[dict] = []
+
+    prior_amounts = before_values.get("amounts") or {}
+    for r in store.query(conn, "SELECT award_uid, amount_usd FROM awards"):
+        uid = str(r["award_uid"])
+        old = (prior_amounts.get(uid) or (None, None))[0]
+        new = r["amount_usd"]
+        if uid not in prior_amounts or old == new or new is None:
+            continue                               # unseen award, or nothing moved
+        meta = award_meta.get(uid, {})
+        out.append({**blank, "change_id": _uid("amount_changed", uid, old, new),
+                    "detected_at": detected, "change_type": "amount_changed",
+                    "announcement_id": meta.get("announcement_id"), "award_uid": uid,
+                    "ticker": tickers.get(meta.get("contractor_raw")),
+                    "prev_value": _usd(old), "new_value": _usd(new),
+                    "materiality_score": scores.get(uid)})
+
+    prior_scores = before_values.get("scores") or {}
+    for r in store.query(conn, "SELECT award_uid, score, tier FROM materiality"):
+        uid = str(r["award_uid"])
+        if uid not in prior_scores:
+            continue                               # first score is not a re-score
+        old_score, old_tier = prior_scores[uid]
+        if old_score == r["score"] and old_tier == r["tier"]:
+            continue
+        meta = award_meta.get(uid, {})
+        out.append({**blank, "change_id": _uid("rescored", uid, old_score, r["score"]),
+                    "detected_at": detected, "change_type": "rescored",
+                    "announcement_id": meta.get("announcement_id"), "award_uid": uid,
+                    "ticker": tickers.get(meta.get("contractor_raw")),
+                    "prev_value": f"{old_score} ({old_tier})",
+                    "new_value": f"{r['score']} ({r['tier']})",
+                    "materiality_score": r["score"]})
+    return out
+
+
+def _usd(v) -> str:
+    """Compact dollars for a human-readable change string. Presentation, not data."""
+    if v is None:
+        return "-"
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    for cutoff, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
+        if abs(n) >= cutoff:
+            return f"${n / cutoff:,.1f}{suffix}"
+    return f"${n:,.0f}"
 
 
 # ================================================================================
@@ -745,10 +883,20 @@ def _escalator(agent: Any) -> Callable[[list, Any], list[dict]] | None:
     return lambda items, llm: _as_rows(agent.run(list(items), llm, model=JUDGE_MODEL))
 
 
-def _try_run(agent: Any, items: Sequence[Any], llm: Any) -> tuple[list[dict], str | None]:
-    """Call an agent, turning any failure into a message instead of a traceback."""
+def _try_run(agent: Any, items: Sequence[Any], llm: Any,
+             on_progress=None) -> tuple[list[dict], str | None]:
+    """Call an agent, turning any failure into a message instead of a traceback.
+
+    `on_progress` is passed only to agents that advertise `supports_progress`. That is
+    an explicit opt-in rather than signature introspection, for the same reason
+    `chunk_size` is: an agent decides how it wants to be driven, and a manager that
+    guesses gets it wrong on the one agent whose batching it must not touch.
+    """
+    kw = {}
+    if on_progress is not None and getattr(agent, "supports_progress", False):
+        kw["on_progress"] = on_progress
     try:
-        return _as_rows(agent.run(list(items), llm)), None
+        return _as_rows(agent.run(list(items), llm, **kw)), None
     except NotCachedError as exc:
         return [], f"NotCachedError: {exc}"
     except Exception as exc:
@@ -776,7 +924,7 @@ def _natural_item(result: Mapping[str, Any]) -> Any:
 
 
 def dispatch(agent: Any, items: Sequence[Any], llm: Any, conn, *,
-             tick_id: str, escalate: bool = True) -> Dispatch:
+             tick_id: str, escalate: bool = True, on_progress=None) -> Dispatch:
     """Steps 3-5: run the agent, escalate what it was unsure about, record everything.
 
     Token attribution, stated plainly rather than fudged: agents batch
@@ -797,7 +945,7 @@ def dispatch(agent: Any, items: Sequence[Any], llm: Any, conn, *,
     started = _now()
     t0 = time.perf_counter()
 
-    results, error = _try_run(agent, d.items, llm)
+    results, error = _try_run(agent, d.items, llm, on_progress=on_progress)
 
     # One bad document must not lose the other forty-nine. When the run is free by
     # construction -- replay or dry-run, where `llm.live` is False -- a batch failure
@@ -952,6 +1100,138 @@ def _entity_ids(conn) -> dict[str, set]:
     }
 
 
+#: Two award rows are the SAME event re-announced when the contract, the holder, the
+#: kind of action, its modification number and its amount all agree. Dates deliberately
+#: are NOT part of the key -- a re-announcement is the same action printed on a second
+#: day, and that is exactly the case being collapsed. Measured on the 50-document
+#: corpus: 16 groups, all pairs, every one a genuine duplicate; no two distinct actions
+#: on one contract share an amount to the dollar.
+_MARK_DUPLICATES_SQL = """
+UPDATE awards SET duplicate_of = keep.award_uid
+  FROM (SELECT contract_uid, contractor_raw, action_type,
+               COALESCE(modification_number, '') AS mn, amount_usd,
+               min(award_uid) AS award_uid
+          FROM awards WHERE contract_uid IS NOT NULL
+         GROUP BY 1, 2, 3, 4, 5) AS keep
+ WHERE awards.contract_uid = keep.contract_uid
+   AND awards.contractor_raw = keep.contractor_raw
+   AND awards.action_type = keep.action_type
+   AND COALESCE(awards.modification_number, '') = keep.mn
+   AND awards.amount_usd IS NOT DISTINCT FROM keep.amount_usd
+   AND awards.award_uid <> keep.award_uid
+"""
+
+#: The creating event is the earliest surviving event on the contract, ties broken by
+#: award_uid so the choice is total. `is_creating_event` is what lets the UI say
+#: "contract created" without inventing a row that the source never printed.
+_MARK_CREATING_SQL = """
+UPDATE awards SET is_creating_event = (awards.award_uid = w.first_uid)
+  FROM (SELECT award_uid,
+               first_value(award_uid) OVER (PARTITION BY contract_uid
+                                            ORDER BY announced_date, award_uid) AS first_uid
+          FROM awards
+         WHERE contract_uid IS NOT NULL AND duplicate_of IS NULL) AS w
+ WHERE awards.award_uid = w.award_uid
+"""
+
+#: The aggregate itself. Every column is a MIN, MAX, SUM, COUNT or a value taken from
+#: the creating event -- there is no judgement here and no model call, which is what
+#: CLAUDE.md requires of anything that is not genuinely reasoning.
+_BUILD_CONTRACTS_SQL = """
+WITH ev AS (
+    SELECT a.*, e.ticker
+      FROM awards a
+      LEFT JOIN entities e ON e.contractor_raw = a.contractor_raw
+     WHERE a.contract_uid IS NOT NULL AND a.duplicate_of IS NULL
+), creator AS (
+    SELECT * FROM ev QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY contract_uid ORDER BY announced_date, award_uid) = 1
+)
+SELECT c.contract_uid,
+       COALESCE(NULLIF(c.base_contract_number, ''), c.contract_number) AS contract_number,
+       c.contractor_raw,
+       c.ticker,
+       c.service_branch,
+       c.work_description,
+       c.contracting_activity,
+       min(ev.announced_date)                                   AS first_event_date,
+       max(ev.announced_date)                                   AS last_event_date,
+       count(*)                                                 AS n_events,
+       sum(CASE WHEN ev.action_type IN ('modification', 'option_exercise')
+                THEN 1 ELSE 0 END)                              AS n_modifications,
+       CASE WHEN c.action_type IN ('modification', 'option_exercise')
+            THEN NULL ELSE c.amount_usd END                     AS initial_value_usd,
+       sum(ev.amount_usd)                                       AS total_actioned_usd,
+       max(ev.cumulative_face_value_usd)                        AS ceiling_usd,
+       c.action_type NOT IN ('modification', 'option_exercise')  AS history_complete
+  FROM creator c
+  JOIN ev USING (contract_uid)
+ GROUP BY c.contract_uid, c.base_contract_number, c.contract_number, c.contractor_raw,
+          c.ticker, c.service_branch, c.work_description, c.contracting_activity,
+          c.action_type, c.amount_usd
+"""
+
+
+def build_contracts(conn) -> dict[str, int]:
+    """Roll award EVENTS up into the contracts they act on. No model, ever.
+
+    Three deterministic passes, in order, because each depends on the one before:
+
+      1. stamp every event with the contract it belongs to   (a key derivation)
+      2. mark re-announced events as duplicates              (a GROUP BY)
+      3. mark the earliest surviving event as creating       (a window function)
+      4. aggregate the survivors into `contracts`            (MIN/MAX/SUM/COUNT)
+
+    Returns counts for the tick report. Idempotent: re-running recomputes the same
+    values from the same rows, so a repeated tick converges instead of drifting.
+    """
+    rows = store.query(conn, "SELECT award_uid, contract_number, base_contract_number "
+                             "FROM awards")
+    stamped = [{"award_uid": r["award_uid"],
+                "uid": schemas.contract_uid(r["contract_number"],
+                                            r["base_contract_number"])}
+               for r in rows]
+    conn.executemany("UPDATE awards SET contract_uid = ? WHERE award_uid = ?",
+                     [(s["uid"], s["award_uid"]) for s in stamped])
+
+    conn.execute("UPDATE awards SET duplicate_of = NULL")
+    conn.execute(_MARK_DUPLICATES_SQL)
+    conn.execute("UPDATE awards SET is_creating_event = FALSE")
+    conn.execute(_MARK_CREATING_SQL)
+
+    built = store.query(conn, _BUILD_CONTRACTS_SQL)
+    now = _now()
+    blank = {c: None for c in store.columns("contracts")}
+    written = store.upsert(conn, "contracts",
+                           [{**blank, **dict(r), "built_at": now} for r in built])
+
+    dupes = conn.execute("SELECT count(*) FROM awards "
+                         "WHERE duplicate_of IS NOT NULL").fetchone()[0]
+    orphans = conn.execute("SELECT count(*) FROM awards "
+                           "WHERE contract_uid IS NULL").fetchone()[0]
+    return {"contracts": written, "events": len(stamped) - dupes,
+            "duplicates": dupes, "unattached": orphans}
+
+
+def _value_snapshot(conn) -> dict[str, dict[str, Any]]:
+    """The VALUES that later ticks diff against, not just the ids.
+
+    `_entity_ids` answers "what exists"; this answers "what did it say". Both are
+    plain SELECTs -- a value diff is still a set operation, so CLAUDE.md's rule that
+    change detection is never an agent holds unchanged.
+    """
+    try:
+        amounts = {str(r["award_uid"]): (r["amount_usd"], r["cumulative_face_value_usd"])
+                   for r in store.query(
+                       conn, "SELECT award_uid, amount_usd, cumulative_face_value_usd "
+                             "FROM awards")}
+        scores = {str(r["award_uid"]): (r["score"], r["tier"]) for r in
+                  store.query(conn, "SELECT award_uid, score, tier FROM materiality")}
+    except Exception:                              # tables not created yet
+        return {"amounts": {}, "scores": {}}
+    return {"amounts": amounts, "scores": scores}
+
+
 def tick(mode: str = "dry-run", *, max_spend: float = DEFAULT_MAX_SPEND,
          db_path: str | pathlib.Path | None = None,
          agents_dir: pathlib.Path | None = None,
@@ -1000,6 +1280,7 @@ def _tick_body(conn, mode, tick_id, max_spend, agents_dir, raw_dir,
     # ---------------------------------------------------------------- 1. survey
     _rule("1. survey  ·  set difference on announcement ids, zero model calls")
     before_ids = _entity_ids(conn)
+    before_values = _value_snapshot(conn)   # values, so a MOVE is detectable too
     manifest_path = (pathlib.Path(raw_dir) if raw_dir else config.RAW) / "manifest.json"
     if manifest_path.exists():
         loaded = store.load_manifest(conn, manifest_path)
@@ -1113,10 +1394,41 @@ def _tick_body(conn, mode, tick_id, max_spend, agents_dir, raw_dir,
         chunks = [items[k:k + size] for k in range(0, len(items), size)] or [[]]
         incremental = len(chunks) > 1
 
+        # A batching agent (resolver, scorer) is ONE chunk on purpose, which used to
+        # mean it printed nothing and persisted nothing until the entire stage
+        # finished -- indistinguishable from a hang, and a crash threw away work the
+        # run had already paid for. `on_progress` is the seam: the agent reports after
+        # each internal batch, and the manager -- which owns the store -- writes.
+        # Ownership stays where CLAUDE.md puts it: agents never touch DuckDB.
+        progress = None
+        if not incremental and getattr(agent, "supports_progress", False):
+            def progress(done_n: int, total_n: int, rows: list[dict],
+                         _name: str = agent.name) -> None:
+                by_table: dict[str, list[dict]] = {}
+                for r in rows:
+                    t = table_for(r)
+                    if t:
+                        by_table.setdefault(t, []).append(r)
+                for t, rs in sorted(by_table.items()):
+                    try:
+                        store.upsert(conn, t, rs)
+                    except Exception as exc:
+                        print(f"  ! incremental upsert failed: "
+                              f"{type(exc).__name__}: {exc}", flush=True)
+                if by_table and do_export:
+                    try:
+                        store.export(conn)
+                    except Exception as exc:
+                        print(f"  ! incremental export failed: "
+                              f"{type(exc).__name__}: {exc}", flush=True)
+                got = ", ".join(f"{len(rs)} -> {t}" for t, rs in sorted(by_table.items()))
+                print(f"  {_name:20s} {done_n:4d}/{total_n}   {got or chr(45)}",
+                      flush=True)
+
         written: dict[str, int] = {}
         reviews, note = 0, None
         for ci, chunk in enumerate(chunks, 1):
-            d = dispatch(agent, chunk, llm, conn, tick_id=tick_id)
+            d = dispatch(agent, chunk, llm, conn, tick_id=tick_id, on_progress=progress)
             dispatches.append(d)
             reviews += len(d.reviews)
             note = d.note or note
@@ -1134,6 +1446,18 @@ def _tick_body(conn, mode, tick_id, max_spend, agents_dir, raw_dir,
                 except Exception as exc:
                     print(f"  ! incremental export failed: "
                           f"{type(exc).__name__}: {exc}", flush=True)
+            # Change detection is a set difference, so it is cheap and idempotent:
+            # change_id is derived from the event, and upsert converges rather than
+            # appending. Running it per wave means the Events tab fills during the
+            # run instead of staying empty until step 5.
+            try:
+                fresh = detect_changes(conn, before_ids, _entity_ids(conn),
+                                       before_values)
+                if fresh:
+                    store.upsert(conn, "changes", fresh)
+            except Exception as exc:
+                print(f"  ! incremental change detection failed: "
+                      f"{type(exc).__name__}: {exc}", flush=True)
             done = sum(len(c) for c in chunks[:ci])
             got = ", ".join(f"{v} -> {k}" for k, v in sorted(d.written.items()))
             print(f"  {agent.name:20s} {done:4d}/{len(items)}   {got or chr(45)}"
@@ -1147,9 +1471,22 @@ def _tick_body(conn, mode, tick_id, max_spend, agents_dir, raw_dir,
     if all_runs:
         store.upsert(conn, "agent_runs", all_runs)
 
+    # ------------------------------------------------------------- 4b. aggregate
+    # Runs AFTER resolution because a contract carries its holder's ticker, and
+    # BEFORE change detection because an event is reported against the contract it
+    # belongs to. Pure SQL: no model, no spend, idempotent.
+    _rule("4b. contracts  ·  events rolled up into the contracts they act on")
+    try:
+        agg = build_contracts(conn)
+        print(f"  {agg['contracts']:,} contract(s) from {agg['events']:,} event(s)"
+              f"   ({agg['duplicates']} duplicate(s) excluded, "
+              f"{agg['unattached']} event(s) with no contract number)", flush=True)
+    except Exception as exc:
+        print(f"  ! build_contracts failed: {type(exc).__name__}: {exc}", flush=True)
+
     # --------------------------------------------------------------- 5. changes
     _rule("5. change detection  ·  a set difference on ids, deliberately not an agent")
-    changes = detect_changes(conn, before_ids, _entity_ids(conn))
+    changes = detect_changes(conn, before_ids, _entity_ids(conn), before_values)
     if changes:
         store.upsert(conn, "changes", changes)
     kinds: dict[str, int] = {}
@@ -1520,10 +1857,30 @@ def selftest() -> int:
     fails += not _ok(proc.returncode == 0 and "schema version" in proc.stdout,
                      "src/schemas.py still prints the contract")
     print("      " + (proc.stdout.strip().splitlines() or [""])[0])
-    diff = subprocess.run(["git", "diff", "main", "--", "src/schemas.py"],
-                          cwd=ROOT, capture_output=True, text=True)
-    fails += not _ok(diff.returncode == 0 and not diff.stdout.strip(),
-                     "git diff main -- src/schemas.py is empty")
+    # The owner may unfreeze the contract (its CHANGES log records each edit), so the
+    # invariant guarded here is not "never changed" but "no change touched a PROMPT" --
+    # that is what would silently invalidate the committed cache and force paid
+    # re-extraction. Compare the prompt projection against the one on `main`.
+    ref_src = subprocess.run(["git", "show", "main:src/schemas.py"],
+                             cwd=ROOT, capture_output=True, text=True)
+    if ref_src.returncode != 0:
+        print("      (no `main` to compare the contract against; skipped)")
+    else:
+        import types
+        ref = types.ModuleType("_schemas_main")
+        sys.modules["_schemas_main"] = ref      # @dataclass resolves via sys.modules
+        try:
+            exec(compile(ref_src.stdout, "main:src/schemas.py", "exec"), ref.__dict__)
+            same = all(
+                ref.object_schema(getattr(ref, n)) == schemas.object_schema(getattr(schemas, n))
+                for n in ("AWARD_FIELDS", "ENTITY_FIELDS", "MATERIALITY_FIELDS"))
+            fails += not _ok(same, "no contract edit changed a prompt schema "
+                                   "(the committed cache still replays)")
+        except Exception as exc:
+            fails += not _ok(False, f"could not compare contracts: "
+                                    f"{type(exc).__name__}: {exc}")
+        finally:
+            sys.modules.pop("_schemas_main", None)
 
     # ---------------------------------------------------------------------- 2
     _head("2. nothing outside src/llm.py imports anthropic")
@@ -1768,6 +2125,11 @@ def main(argv=None) -> int:
                    help=f"abort before spending if the projection exceeds this "
                         f"(default {DEFAULT_MAX_SPEND})")
     t.add_argument("--db", default=None, help="DuckDB path (default data/contracts.duckdb)")
+    t.add_argument("--rebuild", action="store_true",
+                   help="delete the database first and rebuild it from the committed "
+                        "raw documents and model cache. This is what makes a replay a "
+                        "proof rather than a no-op: on a warm database every stage "
+                        "correctly detects no work and the run demonstrates nothing.")
     t.add_argument("--limit", type=int, default=None, help="cap items per stage")
     t.add_argument("--poll-rss", dest="poll_rss", action="store_true", default=None,
                    help="poll the change feed (default: only in --live)")
@@ -1795,6 +2157,17 @@ def main(argv=None) -> int:
         return promote_skills(args.agent, args.rule, apply=args.apply)
     if args.command == "tick":
         mode_name = "live" if args.live else "offline" if args.offline else "dry-run"
+        if getattr(args, "rebuild", False):
+            target = pathlib.Path(args.db or store.DB_PATH)
+            for victim in (target, target.with_suffix(target.suffix + ".wal")):
+                try:
+                    victim.unlink()
+                    print(f"  removed {victim}")
+                except FileNotFoundError:
+                    pass
+                except OSError as exc:
+                    print(f"  ! could not remove {victim}: {exc}")
+                    return 2
         return tick(mode_name, max_spend=args.max_spend, db_path=args.db,
                     limit=args.limit, use_rss=args.poll_rss, do_export=args.export)
 

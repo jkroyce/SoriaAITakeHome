@@ -67,6 +67,50 @@ try:
           [data-testid="stMetricValue"] {font-size: 1.25rem;}
           [data-testid="stMetricLabel"] {font-size: .78rem; opacity: .75;}
           hr {margin: .7rem 0;}
+
+          /* --- scale with the window instead of a hardcoded pixel height ---
+             A fixed table height taller than the viewport gives you TWO scrollbars:
+             the page's and the grid's. Sizing the grid off 100vh means the page
+             itself never needs to scroll, so only the grid scrolls -- and the table
+             grows on a large monitor instead of wasting it.
+             --chrome is everything stacked above the grid (header, tabs, metrics,
+             filter row); tune that one number, not each call site. */
+          :root {--chrome: 310px;}
+          .block-container {max-width: 100%;}
+          [class*="st-key-maintable"] [data-testid="stDataFrame"],
+          [class*="st-key-maintable"] [data-testid="stDataFrameResizable"] {
+              height: calc(100vh - var(--chrome)) !important;
+              min-height: 240px;
+          }
+          @media (max-height: 780px) {:root {--chrome: 280px;}}
+          @media (max-width: 1200px)  {:root {--chrome: 340px;}}
+          /* Wide content scrolls inside its own box; the page never scrolls sideways. */
+          [data-testid="stHorizontalBlock"] {flex-wrap: wrap;}
+
+          /* --- detail modal: built to be read, not audited --- */
+          .dt-head {display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap;
+                    margin:0 0 .1rem 0;}
+          .dt-name {font-size:1.35rem; font-weight:650; letter-spacing:-.01em;}
+          .dt-tkr  {font-size:.78rem; font-weight:700; padding:.1rem .42rem;
+                    border-radius:4px; background:#1f6feb; color:#fff;}
+          .dt-sub  {opacity:.62; font-size:.84rem; margin:0 0 .7rem 0;}
+          .dt-amt  {font-size:2.0rem; font-weight:680; letter-spacing:-.02em;
+                    line-height:1.15;}
+          .dt-badge{display:inline-block; font-size:.7rem; font-weight:750;
+                    letter-spacing:.06em; padding:.16rem .5rem; border-radius:999px;}
+          .dt-alert  {background:#7f1d1d; color:#fecaca;}
+          .dt-notable{background:#78350f; color:#fde68a;}
+          .dt-routine{background:#334155; color:#cbd5e1;}
+          .dt-chip {display:inline-block; font-size:.7rem; padding:.14rem .46rem;
+                    margin:.12rem .22rem .12rem 0; border-radius:4px;
+                    background:rgba(128,128,128,.16); opacity:.85;}
+          .dt-facts{width:100%; border-collapse:collapse; font-size:.87rem;}
+          .dt-facts td {padding:.3rem .1rem; border-bottom:1px solid rgba(128,128,128,.16);
+                        vertical-align:top;}
+          .dt-facts td:first-child {opacity:.6; width:34%; white-space:nowrap;}
+          .dt-why  {font-size:.94rem; line-height:1.5; margin:.1rem 0 .5rem 0;}
+          .dt-lbl  {font-size:.7rem; font-weight:700; letter-spacing:.08em;
+                    opacity:.5; margin:.85rem 0 .25rem 0;}
         </style>
         """,
         unsafe_allow_html=True)
@@ -148,7 +192,7 @@ TS_COLS = {t: [f.name for f in fields if f.sql == "TIMESTAMP"]
            for t, (fields, _pk) in schemas.TABLES.items()}
 
 UI_TABLES = ["awards", "announcements", "entities", "materiality", "agent_runs",
-             "review_queue", "changes"]
+             "review_queue", "changes", "contracts"]
 
 # Confidence at or below which the manager escalates, then flags for review (CLAUDE.md).
 CONFIDENCE_FLOOR = 0.7
@@ -317,8 +361,14 @@ def _conform(df: pd.DataFrame, table: str) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_table(table: str, _stamp: str):
-    """Return (frame, path_used, status). Status is found / missing / error: ..."""
+def load_table(table: str, stamp: str):
+    """Return (frame, path_used, status). Status is found / missing / error: ...
+
+    `stamp` MUST NOT be renamed to `_stamp`: st.cache_data excludes leading-underscore
+    parameters from the cache key, so the fingerprint would be accepted and ignored and
+    every reread would serve the first load forever. That is exactly what it did until
+    the live watcher made the staleness visible.
+    """
     for p in _candidates(table):
         if not p.exists():
             continue
@@ -341,6 +391,30 @@ def _fingerprint() -> str:
             except OSError:
                 continue
     return "|".join(parts) or "none"
+
+
+#: How often the watcher checks the exports for a write. Short enough that a running
+#: pipeline looks live, long enough that it costs nothing: one os.stat per candidate
+#: path, no query and no model call.
+WATCH_SECONDS = 3.0
+
+
+@st.fragment(run_every=WATCH_SECONDS)
+def data_watcher(stamp: str) -> None:
+    """Rerun the whole app when the pipeline writes new exports.
+
+    This is what connects the front end to the back end. It deliberately watches the
+    exported FILES rather than opening the database: DuckDB is single-writer, so a UI
+    that held a connection would block the very pipeline it is trying to follow. The
+    manager already exports after every wave (and now after every batch), so the files
+    are the live surface.
+
+    `_fingerprint` is the same mtime+size key `load_table` is cached on, so a changed
+    fingerprint both triggers the rerun and invalidates the cache -- there is no
+    separate cache-clearing step to get out of sync.
+    """
+    if _fingerprint() != stamp:
+        st.rerun(scope="app")
 
 
 # ---------------------------------------------------------------------------------
@@ -633,6 +707,17 @@ def enrich(frames: dict) -> pd.DataFrame:
 
     df = aw.merge(mat.drop_duplicates("award_uid"), on="award_uid", how="left")
     df = df.merge(ent.drop_duplicates("contractor_raw"), on="contractor_raw", how="left")
+
+    # Every award row is an EVENT on a contract; carry the contract it belongs to so a
+    # single event can be shown in the context of its whole timeline.
+    con = frames.get("contracts")
+    if con is not None and not con.empty and "contract_uid" in df.columns:
+        keep = ["contract_uid", "contract_number", "n_events", "n_modifications",
+                "initial_value_usd", "total_actioned_usd", "ceiling_usd",
+                "history_complete", "first_event_date", "last_event_date"]
+        c = con[[k for k in keep if k in con.columns]].drop_duplicates("contract_uid")
+        c = c.rename(columns={"contract_number": "contract_number_agg"})
+        df = df.merge(c, on="contract_uid", how="left")
     df["tier_rank"] = df["tier"].map(TIER_RANK)
     df["tier_rank"] = pd.to_numeric(df["tier_rank"], errors="coerce").fillna(
         len(TIER_ORDER))
@@ -667,7 +752,14 @@ def show_table(df: pd.DataFrame, tier_col: str | None = None, height: int | None
     if column_config:
         kwargs["column_config"] = column_config
     if select:
-        kwargs.update(on_select="rerun", selection_mode="single-row", key=key)
+        # The key carries a nonce that `selected_row` bumps after it reads a click.
+        # A selectable st.dataframe keeps its selection in session state forever, so a
+        # naive `if selection.rows:` re-fires the modal on EVERY later rerun -- click a
+        # row, dismiss it, change a filter, and it springs back. Re-mounting the table
+        # under a fresh key is what actually clears the selection, which also means the
+        # same row can be clicked a second time and still open.
+        kwargs.update(on_select="rerun", selection_mode="single-row",
+                      key=f"{key}__{st.session_state.get(f'_sel_nonce_{key}', 0)}")
     elif key:
         kwargs["key"] = key
     data = df
@@ -682,6 +774,24 @@ def show_table(df: pd.DataFrame, tier_col: str | None = None, height: int | None
     except Exception:
         kwargs.pop("column_config", None)
         return st.dataframe(df, **kwargs)
+
+
+def selected_row(sel, key: str) -> int | None:
+    """The row a user just clicked, returned EXACTLY ONCE.
+
+    Pair with `show_table(..., select=True, key=key)`: reading the click bumps that
+    table's nonce, so the next rerun mounts a fresh widget with no selection and the
+    modal does not reopen on its own. See the note in `show_table`.
+    """
+    try:
+        rows = list(sel.selection.rows)
+    except Exception:
+        return None
+    if not rows:
+        return None
+    slot = f"_sel_nonce_{key}"
+    st.session_state[slot] = st.session_state.get(slot, 0) + 1
+    return int(rows[0])
 
 
 def empty_state(table: str, what: str) -> None:
@@ -712,16 +822,15 @@ def tier_text(v) -> str:
 
 
 # ---------------------------------------------------------------------------------
-# View 1 -- change feed
-# ---------------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------------
 # Modals -- a click on a ticker or an event opens the detail, instead of stacking
 # another panel onto an already dense page.
 # ---------------------------------------------------------------------------------
 
 TICKER_COL = st.column_config.LinkColumn(
-    "Ticker", help="Open this ticker's awards", display_text=r"ticker=([A-Z.]+)")
+    "Ticker", help="Open this company", display_text=r"ticker=([A-Z.]+)")
+
+CONTRACT_COL = st.column_config.LinkColumn(
+    "Contract", help="Open this contract", display_text=r"contract=(.+)$")
 
 
 def ticker_link(v) -> str:
@@ -732,156 +841,578 @@ def ticker_link(v) -> str:
     return f"?ticker={t}" if t and t != DASH else ""
 
 
-@st.dialog("Awards", width="large")
+def contract_link(v) -> str:
+    """A contract cell rendered as a link, addressed by its printed number.
+
+    Streamlit cannot open a dialog from inside another dialog, so every hop in
+    Event -> Contract -> Company is a query param plus a rerun: the current modal
+    closes and the next one opens. Using the contract NUMBER rather than its uid
+    keeps the link legible and lets `display_text` show it without a second column.
+    """
+    t = txt(v, "")
+    return f"?contract={t}" if t and t != DASH else ""
+
+
+def pretty_date(v) -> str:
+    """'Jul 17, 2026'. ISO is for machines and for tables that need to sort."""
+    s = iso_date(v)
+    if s == DASH:
+        return ""
+    try:
+        return pd.Timestamp(s).strftime("%b %d, %Y").replace(" 0", " ")
+    except (ValueError, TypeError):
+        return s
+
+
+def company_name(frames, r) -> str:
+    """The name a reader knows the company by, not the string the DoD filed.
+
+    `contractor_raw` is deliberately byte-for-byte as printed -- trailing asterisk,
+    'Inc.', division suffix and all -- because it is the join key. That is right for
+    the database and wrong for a human, so the resolved parent is preferred here.
+    """
+    raw = txt(r.get("contractor_raw"))
+    ent = frames.get("entities")
+    if ent is None or ent.empty or raw == DASH:
+        return raw
+    row = ent[ent["contractor_raw"] == r.get("contractor_raw")].head(1)
+    if row.empty:
+        return raw
+    for col in ("parent_company", "normalized_name"):
+        name = txt(row.iloc[0].get(col))
+        if name != DASH:
+            return name
+    return raw
+
+
+def display_company(frame) -> "pd.Series":
+    """The resolved parent where we have one, the filed name where we do not.
+
+    Vectorised twin of `company_name` for table columns. 'Rockwell Collins Inc.' is a
+    join key; 'RTX Corporation' is what a reader is holding.
+    """
+    raw = frame["contractor_raw"].map(txt)
+    if "parent_company" not in frame.columns:
+        return raw
+    parent = frame["parent_company"].map(lambda v: txt(v, ""))
+    return parent.where(parent.astype(bool), raw)
+
+
+def facts_table(pairs) -> None:
+    """Label/value rows. Only rows that actually have a value are rendered -- a modal
+    full of em-dashes reads as broken data rather than as absent data."""
+    rows = "".join(f"<tr><td>{lbl}</td><td>{val}</td></tr>"
+                   for lbl, val in pairs if val and val != DASH)
+    if rows:
+        st.markdown(f"<table class='dt-facts'>{rows}</table>", unsafe_allow_html=True)
+
+
+def competition_text(r) -> str:
+    """'One bid solicited, one received' beats 'bids_solicited: 1'."""
+    sol, rec = r.get("bids_solicited"), r.get("bids_received")
+    parts = []
+    if not _isna(sol):
+        parts.append(f"{int(sol):,} solicited")
+    if not _isna(rec):
+        parts.append(f"{int(rec):,} received")
+    if not parts:
+        return ""
+    label = ", ".join(parts)
+    if not _isna(rec) and int(rec) == 1:
+        label += "  ·  sole source"
+    return label
+
+
+def place_text(r) -> str:
+    where = txt(r.get("place_of_performance"), "")
+    done = pretty_date(r.get("completion_date"))
+    if where and done:
+        return f"{where}  ·  through {done}"
+    return where or (f"through {done}" if done else "")
+
+
+def event_kind(r) -> str:
+    """What this event DID to the contract, in the words a reader thinks in.
+
+    Derived, never stored: `is_creating_event` plus `action_type` already say it, and
+    a fourth column repeating them could only drift from them.
+    """
+    if bool(r.get("is_creating_event")):
+        return "Contract created"
+    a = txt(r.get("action_type"), "")
+    return {"modification": "Modification",
+            "option_exercise": "Option exercised",
+            "multi_award_pool": "Pool award"}.get(a, "Order placed")
+
+
+def event_kinds(frame) -> "pd.Series":
+    return frame.apply(event_kind, axis=1) if len(frame) else pd.Series(dtype="object")
+
+
+@st.dialog("Contracts", width="large")
 def ticker_dialog(frames, df, ticker: str) -> None:
-    """Every award for one ticker. Opened by clicking the ticker in any table."""
+    """Every contract for one ticker. Opened by clicking the ticker in any table."""
     sub = df[df["ticker"] == ticker].sort_values("announced_date", ascending=False)
 
     ent = frames.get("entities")
+    name, how = ticker, ""
     if ent is not None and not ent.empty:
         row = ent[ent["ticker"] == ticker].head(1)
         if not row.empty:
             r = row.iloc[0]
-            name = txt(r["parent_company"])
-            st.markdown(f"**{name if name != DASH else ticker}** · `{ticker}` · "
-                        f"{txt(r['relationship'])}")
-            st.caption(txt(r["reasoning"]))
+            name = txt(r["parent_company"], ticker)
+            how = txt(r["reasoning"], "")
+    st.markdown(
+        f"<div class='dt-head'><span class='dt-name'>{name}</span>"
+        f"<span class='dt-tkr'>{ticker}</span></div>", unsafe_allow_html=True)
 
     if sub.empty:
-        st.info(f"No awards for {ticker} in the current export.")
+        st.info(f"No contracts for {ticker} in the current export.")
         return
 
+    # How many DoD entities roll up to this ticker, and how many contracts they hold:
+    # the resolver's whole job, and the thing a reader cannot see from the ticker
+    # alone ("Sikorsky" is LMT).
+    units = sorted({txt(n) for n in sub["contractor_raw"].dropna().unique()})
+    n_con = sub["contract_uid"].nunique() if "contract_uid" in sub.columns else len(sub)
+    st.markdown(
+        f"<div class='dt-sub'>{n_con:,} contracts · {len(sub):,} events across "
+        f"{len(units)} contracting "
+        f"{'entity' if len(units) == 1 else 'entities'}</div>",
+        unsafe_allow_html=True)
+
     metric_row([
-        ("Obligated", usd(sub["amount_usd"].sum(min_count=1))),
-        ("Awards", f"{len(sub):,}"),
+        ("Actioned", usd(sub["amount_usd"].sum(min_count=1))),
         ("Largest", usd(sub["amount_usd"].max())),
+        ("Alerts", f"{int((sub['tier'] == 'alert').sum()):,}"),
     ])
+
+    # A company holds CONTRACTS, so that is what its view lists. Each contract number
+    # links back down into the contract, closing the loop:
+    # Event -> Contract -> Company -> Contract.
+    con = frames.get("contracts")
+    held = None
+    if con is not None and not con.empty and "contract_uid" in sub.columns:
+        held = con[con["contract_uid"].isin(set(sub["contract_uid"].dropna()))]
+    if held is not None and not held.empty:
+        held = held.sort_values(["total_actioned_usd", "n_events"],
+                                ascending=[False, False], na_position="last")
+        show_table(pd.DataFrame({
+            "Contract": held["contract_number"].map(contract_link),
+            "Events": held["n_events"],
+            "Mods": held["n_modifications"],
+            "Actioned": held["total_actioned_usd"].map(usd),
+            "Ceiling": held["ceiling_usd"].map(usd),
+            "Latest": held["last_event_date"].map(pretty_date),
+            "History": held["history_complete"].map(
+                lambda v: "complete" if v is True else "opens earlier"),
+        }), height=300, key=f"tk_{ticker}",
+            column_config={
+                "Contract": CONTRACT_COL,
+                "Events": st.column_config.NumberColumn("Events", format="%d"),
+                "Mods": st.column_config.NumberColumn("Mods", format="%d"),
+            })
+    else:
+        show_table(pd.DataFrame({
+            "Date": sub["announced_date"].map(pretty_date),
+            "Tier": sub["tier"].map(tier_text),
+            "Event": event_kinds(sub),
+            "Contract": sub["contract_number"].map(contract_link),
+            "Amount": sub["amount_usd"].map(usd),
+        }), tier_col="Tier", height=300, key=f"tk_{ticker}",
+            column_config={"Contract": CONTRACT_COL})
+    if how:
+        st.caption(f"Why these roll up to {ticker}: {how}")
+
+
+def contract_timeline(frames, r) -> None:
+    """Every event on this event's contract, oldest first. The point of the aggregate.
+
+    Silent when the contract has only this one event: a one-row "history" is noise.
+    """
+    uid = r.get("contract_uid")
+    aw = frames.get("awards")
+    if not uid or aw is None or aw.empty or "contract_uid" not in aw.columns:
+        return
+    sib = aw[aw["contract_uid"] == uid]
+    if "duplicate_of" in sib.columns:
+        sib = sib[sib["duplicate_of"].isna()]
+    if len(sib) < 2:
+        return
+    sib = sib.sort_values(["announced_date", "award_uid"])
+
+    con = frames.get("contracts")
+    head = ""
+    if con is not None and not con.empty:
+        row = con[con["contract_uid"] == uid].head(1)
+        if not row.empty:
+            c = row.iloc[0]
+            head = f"{int(c['n_events'])} events · {usd(c['total_actioned_usd'])} actioned"
+            if not bool(c.get("history_complete", True)):
+                head += " · opens before our window"
+
+    st.markdown("<div class='dt-lbl'>CONTRACT HISTORY</div>", unsafe_allow_html=True)
+    if head:
+        st.caption(head)
     show_table(pd.DataFrame({
-        "Date": sub["announced_date"].map(iso_date),
-        "Tier": sub["tier"].map(tier_text),
-        "Contractor": sub["contractor_raw"].map(txt),
-        "Amount": sub["amount_usd"].map(usd),
-        "Action": sub["action_type"].map(lambda v: txt(v).replace("_", " ")),
-        "Branch": sub["service_branch"].map(txt),
-    }), tier_col="Tier", height=300, key=f"tk_{ticker}")
+        "Date": sib["announced_date"].map(pretty_date),
+        "Event": event_kinds(sib),
+        "Mod": sib["modification_number"].map(lambda v: txt(v, "")),
+        "Amount": sib["amount_usd"].map(usd),
+        "Running total": sib["amount_usd"].fillna(0).cumsum().map(usd),
+    }), height=min(320, 40 + 35 * len(sib)), key=f"tl_{uid}")
 
 
-@st.dialog("Provenance", width="large")
-def provenance_dialog(frames, r) -> None:
-    """The audit trail for ONE row: source document, digest, and the model call
-    behind every AI-derived field. Same panel as the Provenance view -- reached
-    here by clicking the event or award it belongs to."""
-    provenance_panel(frames, r)
+@st.dialog("Contract", width="large")
+def contract_dialog(frames, df, number: str, event=None) -> None:
+    """One contract: who holds it, what it is worth now, and everything done to it.
 
+    This is where an event click lands, because an event is only meaningful against
+    the thing it changed. The company name is a link out to the company view, so the
+    domain reads the same way the user navigates it:
+    Event -> Contract -> Company.
+    """
+    con = frames.get("contracts")
+    row = None
+    if con is not None and not con.empty:
+        m = con[con["contract_number"] == number]
+        if not m.empty:
+            row = m.iloc[0]
+
+    # Membership is the AGGREGATE key, never the printed number: a task order carries
+    # its own contract_number and names the vehicle in base_contract_number, so
+    # filtering on the number alone returns just the one event you clicked.
+    uid = row["contract_uid"] if row is not None else schemas.contract_uid(number)
+    if not df.empty and "contract_uid" in df.columns:
+        events = df[df["contract_uid"] == uid]
+    else:
+        events = df[df["contract_number"] == number] if not df.empty else df
+    if row is None and (events is None or events.empty):
+        st.info(f"No contract `{number}` in the current export.")
+        return
+    if "duplicate_of" in events.columns:
+        events = events[events["duplicate_of"].isna()]
+    events = events.sort_values(["announced_date", "award_uid"])
+
+    src = row if row is not None else events.iloc[0]
+    ticker = txt(src.get("ticker"), "")
+    name = company_name(frames, events.iloc[0] if not events.empty else src)
+    badge = f"<span class='dt-tkr'>{ticker}</span>" if ticker and ticker != DASH else ""
+    st.markdown(
+        f"<div class='dt-head'><span class='dt-name'>{name}</span>{badge}</div>",
+        unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='dt-sub'>{number}  ·  "
+        f"{txt(src.get('service_branch'), '').title()}</div>", unsafe_allow_html=True)
+
+    total = src.get("total_actioned_usd") if row is not None else events["amount_usd"].sum(min_count=1)
+    left, right = st.columns([1.15, 1])
+    with left:
+        st.markdown(f"<div class='dt-amt'>{usd(total)}</div>", unsafe_allow_html=True)
+        st.caption("actioned to date" + (f" · ceiling {usd(src.get('ceiling_usd'))}"
+                                         if not _isna(src.get("ceiling_usd")) else ""))
+    with right:
+        n = int(src.get("n_events") or len(events))
+        st.markdown(
+            f"<div style='font-size:1.6rem;font-weight:650'>{n}"
+            f"<span style='font-size:.8rem;opacity:.5'> event"
+            f"{'' if n == 1 else 's'}</span></div>", unsafe_allow_html=True)
+        if row is not None and not bool(src.get("history_complete", True)):
+            st.caption("opens before our window")
+
+    work = txt(src.get("work_description"), "")
+    if work:
+        st.markdown("<div class='dt-lbl'>WHAT IT IS</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='dt-why'>{work}</div>", unsafe_allow_html=True)
+
+    if row is not None and not bool(src.get("history_complete", True)):
+        st.info("The earliest event we hold is a modification, so this contract was "
+                "created before our 50-day window. Its opening value is unknown and "
+                "the total below counts only what we have seen.")
+
+    st.markdown("<div class='dt-lbl'>HISTORY</div>", unsafe_allow_html=True)
+    show_table(pd.DataFrame({
+        "Date": events["announced_date"].map(pretty_date),
+        "Event": event_kinds(events),
+        "Mod": events["modification_number"].map(lambda v: txt(v, "")),
+        "Tier": events["tier"].map(tier_text),
+        "Score": events["score"],
+        "Amount": events["amount_usd"].map(usd),
+        "Running total": events["amount_usd"].fillna(0).cumsum().map(usd),
+    }), tier_col="Tier", height=min(340, 45 + 35 * max(len(events), 1)),
+        key=f"cd_{number}",
+        column_config={"Score": st.column_config.NumberColumn("Score", format="%d")})
+
+    facts_table([
+        ("Awarded by", txt(src.get("contracting_activity"), "")),
+        ("Opening value", usd(src.get("initial_value_usd"))
+         if row is not None and not _isna(src.get("initial_value_usd")) else ""),
+        ("Modifications", str(int(src["n_modifications"]))
+         if row is not None and not _isna(src.get("n_modifications")) else ""),
+        ("First seen", pretty_date(src.get("first_event_date"))),
+        ("Latest event", pretty_date(src.get("last_event_date"))),
+    ])
+
+    if ticker and ticker != DASH:
+        st.markdown(f"[View {name} and its other contracts →](?ticker={ticker})")
+
+    # The event that was clicked keeps its own reasoning and audit trail, one level
+    # down: the contract answers "what is this", the event answers "why now".
+    if event is not None:
+        with st.expander(f"This event — {event_kind(event)} on "
+                         f"{pretty_date(event.get('announced_date'))}"):
+            why = txt(event.get("rationale"), "")
+            if why:
+                st.markdown(f"<div class='dt-why'>{why}</div>", unsafe_allow_html=True)
+            drivers = as_list(event.get("drivers"))
+            if drivers:
+                st.markdown("".join(
+                    f"<span class='dt-chip'>{str(d).replace('_', ' ')}</span>"
+                    for d in drivers), unsafe_allow_html=True)
+            provenance_panel(frames, event)
+
+
+@st.dialog("Detail", width="large")
+def award_dialog(frames, r) -> None:
+    """One event, written for someone deciding whether it moves a position.
+
+    Ordering is the whole design: what it is, what it is worth, why it matters, what
+    the work is, the contract it belongs to and that contract's history, then the
+    mechanics. Identifiers, hashes, cache keys and model names are real and stay
+    available -- this product's claim is that every number is traceable -- but they
+    live one click down, because a reader who wants the audit trail will look for it
+    and a reader who does not should never see it.
+    """
+    tier = txt(r.get("tier"), "routine").lower()
+    ticker = txt(r.get("ticker"), "")
+    badge = f"<span class='dt-tkr'>{ticker}</span>" if ticker and ticker != DASH else ""
+    st.markdown(
+        f"<div class='dt-head'><span class='dt-name'>{company_name(frames, r)}</span>"
+        f"{badge}</div>", unsafe_allow_html=True)
+
+    sub = "  ·  ".join(p for p in (
+        pretty_date(r.get("announced_date")),
+        txt(r.get("service_branch"), "").title(),
+        event_kind(r),
+    ) if p)
+    st.markdown(f"<div class='dt-sub'>{sub}</div>", unsafe_allow_html=True)
+
+    left, right = st.columns([1.15, 1])
+    with left:
+        st.markdown(f"<div class='dt-amt'>{usd(r.get('amount_usd'))}</div>",
+                    unsafe_allow_html=True)
+        st.caption(usd_exact(r.get("amount_usd")))
+    with right:
+        score = r.get("score")
+        st.markdown(
+            f"<div class='dt-badge dt-{tier}'>{tier.upper()}</div>"
+            f"<div style='font-size:1.6rem;font-weight:650;margin-top:.2rem'>"
+            f"{'' if _isna(score) else int(score)}"
+            f"<span style='font-size:.8rem;opacity:.5'> / 100</span></div>",
+            unsafe_allow_html=True)
+
+    why = txt(r.get("rationale"), "")
+    if why:
+        st.markdown("<div class='dt-lbl'>WHY IT MATTERS</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='dt-why'>{why}</div>", unsafe_allow_html=True)
+    drivers = as_list(r.get("drivers"))
+    if drivers:
+        st.markdown("".join(
+            f"<span class='dt-chip'>{str(d).replace('_', ' ')}</span>" for d in drivers),
+            unsafe_allow_html=True)
+
+    work = txt(r.get("work_description"), "")
+    if work:
+        st.markdown("<div class='dt-lbl'>THE WORK</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='dt-why'>{work}</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='dt-lbl'>CONTRACT</div>", unsafe_allow_html=True)
+    mod = txt(r.get("modification_number"), "")
+    base = txt(r.get("base_contract_number"), "")
+    num = txt(r.get("contract_number"), "")
+    # Skills rule R-002: a modification with no new number of its own carries the base
+    # contract's number, so printing both reads as two facts when there is only one.
+    on_base = f" on {base}" if base and base != num else ""
+    facts_table([
+        ("Contract", num),
+        ("Modification", f"{mod}{on_base}" if mod else ""),
+        ("Total contract value", usd(r.get("cumulative_face_value_usd"))
+         if not _isna(r.get("cumulative_face_value_usd")) else ""),
+        ("Performance", place_text(r)),
+        ("Awarded by", txt(r.get("contracting_activity"), "")),
+        ("Competition", competition_text(r)),
+        ("Pricing", txt(r.get("pricing_type"), "").replace("_", " ")),
+        ("Set-aside", "Small business" if r.get("small_business") is True else ""),
+        ("Vehicle", "  ·  ".join(p for p in (
+            "IDIQ" if r.get("is_idiq") is True else "",
+            "Multiple award — the amount is a shared ceiling"
+            if r.get("is_multi_award") is True else "") if p)),
+    ])
+
+    contract_timeline(frames, r)
+
+    ann = frames.get("announcements")
+    if ann is not None and not ann.empty:
+        src = ann[ann["announcement_id"] == r.get("announcement_id")]
+        url = txt(src.iloc[0]["url"], "") if not src.empty else ""
+        if url:
+            st.markdown(f"[Read the original announcement ↗]({url})")
+
+    xc = r.get("extraction_confidence")
+    if not _isna(xc) and float(xc) < CONFIDENCE_FLOOR:
+        st.warning(f"Read this one with care — the extractor was only "
+                   f"{float(xc):.0%} confident, below the "
+                   f"{CONFIDENCE_FLOOR:.0%} floor, so it is queued for review.")
+
+    with st.expander("Audit trail — sources, models and cache keys"):
+        provenance_panel(frames, r)
+
+
+# ---------------------------------------------------------------------------------
+# View 1 -- the contract event log
+# ---------------------------------------------------------------------------------
 
 def view_events(frames, df):
-    """Tab 1 -- change events only. One table on the page."""
-    ch = frames.get("changes")
-    if ch is None or ch.empty:
-        empty_state("changes", "Change events appear here once `manager tick` has "
-                               "diffed award UIDs against the previous run.")
-        return
+    """Tab 1 -- the event log. Every change to every contract, most material first.
 
-    cols = ["award_uid", "contractor_raw", "amount_usd", "action_type", "service_branch"]
-    ev = ch.merge(df[[c for c in cols if c in df.columns]].drop_duplicates("award_uid"),
-                  on="award_uid", how="left")
-    ev = ev.sort_values(["materiality_score", "detected_at"],
-                        ascending=[False, False], na_position="last")
-
-    metric_row([
-        ("Events", f"{len(ev):,}"),
-        ("Tickers", f"{ev['ticker'].nunique():,}"),
-        ("Value", usd(ev["amount_usd"].sum(min_count=1))),
-    ])
-
-    sel = show_table(pd.DataFrame({
-        "Detected": ev["detected_at"].map(iso_ts),
-        "Change": ev["change_type"].map(lambda v: txt(v).replace("_", " ")),
-        "Score": ev["materiality_score"],
-        "Ticker": ev["ticker"].map(ticker_link),
-        "Contractor": ev["contractor_raw"].map(txt),
-        "Amount": ev["amount_usd"].map(usd),
-        "Was": ev["prev_value"].map(txt),
-        "Now": ev["new_value"].map(txt),
-    }), height=520, key="change_events", select=True,
-        column_config={"Ticker": TICKER_COL})
-
-    try:
-        picked = list(sel.selection.rows)
-    except Exception:
-        picked = []
-    if picked:
-        uid = ev.iloc[picked[0]]["award_uid"]
-        match = df[df["award_uid"] == uid]
-        if match.empty:
-            st.warning(f"No award row for `{uid}` in this export.")
-        else:
-            provenance_dialog(frames, match.iloc[0])
-
-
-def view_feed(frames, df):
-    """Tab 2 -- awards, materiality-ranked. One table on the page."""
+    Reads the EVENT table (awards) rather than the detection log (changes): a reader
+    wants what the government did to a contract, not when our pipeline happened to
+    notice. `changes` remains the tick-diff and lives in the audit trail.
+    """
     if df.empty:
-        empty_state("awards", "Awards ranked by investor materiality appear here.")
+        empty_state("awards", "Contract events appear here once the pipeline has run.")
         return
 
-    with st.popover("Filters", width="content"):
-        tiers = st.multiselect("Tier", TIER_ORDER, default=TIER_ORDER)
-        ticker = st.selectbox(
-            "Ticker", ["all"] + sorted({str(t) for t in df["ticker"].dropna().unique()}))
-        branches = st.multiselect(
-            "Branch", sorted({str(b) for b in df["service_branch"].dropna().unique()}))
-        days = st.number_input("Lookback (days)", min_value=1, max_value=3650,
-                               value=90, step=7)
+    ev = df[df["duplicate_of"].isna()] if "duplicate_of" in df.columns else df
+    ev = ev.assign(_kind=event_kinds(ev))
 
-    f = df.copy()
+    kinds = ["Contract created", "Modification", "Option exercised",
+             "Order placed", "Pool award"]
+    present = [k for k in kinds if (ev["_kind"] == k).any()]
+    with st.popover("Filters", width="content"):
+        picked = st.multiselect("Event", present, default=present, key="ev_kind")
+        tickers_only = st.toggle("Listed companies only", value=False, key="ev_listed")
+        tiers = st.multiselect("Tier", TIER_ORDER, default=TIER_ORDER, key="ev_tier")
+
+    f = ev[ev["_kind"].isin(picked)] if picked else ev
+    if tickers_only:
+        f = f[f["ticker"].notna()]
     if len(tiers) < len(TIER_ORDER):
         f = f[f["tier"].isin(tiers)]
-    if ticker != "all":
-        f = f[f["ticker"] == ticker]
-    if branches:
-        f = f[f["service_branch"].isin(branches)]
-    if f["announced_date"].notna().any():
-        cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=int(days))
-        f = f[f["announced_date"].isna() | (f["announced_date"] >= cutoff)]
-
-    f = f.sort_values(["tier_rank", "score", "announced_date"],
-                      ascending=[True, False, False], na_position="last")
+    f = f.sort_values(["score", "announced_date"], ascending=[False, False],
+                      na_position="last")
 
     metric_row([
-        ("Awards", f"{len(f):,}"),
-        ("Alerts", f"{int((f['tier'] == 'alert').sum()):,}"),
-        ("Obligated", usd(f["amount_usd"].sum(min_count=1))),
+        ("Events", f"{len(f):,}"),
+        ("Contracts touched", f"{f['contract_uid'].nunique():,}"),
+        ("Changes to existing", f"{int((f['_kind'] != 'Contract created').sum()):,}"),
+        ("Value", usd(f["amount_usd"].sum(min_count=1))),
     ])
 
     if f.empty:
-        st.warning("No awards match these filters.")
+        st.warning("No events match these filters.")
         return
 
-    ev = show_table(pd.DataFrame({
-        "Date": f["announced_date"].map(iso_date),
-        "Tier": f["tier"].map(tier_text),
-        "Score": f["score"],
-        "Ticker": f["ticker"].map(ticker_link),
-        "Contractor": f["contractor_raw"].map(txt),
-        "Amount": f["amount_usd"].map(usd),
-        "Action": f["action_type"].map(lambda v: txt(v).replace("_", " ")),
-        "Branch": f["service_branch"].map(txt),
-    }), tier_col="Tier", height=520, key="feed_table", select=True,
-        column_config={"Ticker": TICKER_COL,
-                       "Score": st.column_config.NumberColumn("Score", format="%d")})
+    with st.container(key="maintable_events"):
+        sel = show_table(pd.DataFrame({
+            "Date": f["announced_date"].map(pretty_date),
+            "Event": f["_kind"],
+            "Tier": f["tier"].map(tier_text),
+            "Score": f["score"],
+            "Ticker": f["ticker"].map(ticker_link),
+            "Company": display_company(f),
+            "Contract": f["contract_number"].map(txt),
+            "Amount": f["amount_usd"].map(usd),
+            "Contract to date": f["total_actioned_usd"].map(usd)
+            if "total_actioned_usd" in f.columns else DASH,
+        }), tier_col="Tier", height=520, key="change_events", select=True,
+            column_config={
+                "Ticker": TICKER_COL,
+                "Score": st.column_config.NumberColumn("Score", format="%d"),
+            })
 
-    try:
-        rows = list(ev.selection.rows)
-    except Exception:
-        rows = []
-    if rows:
-        provenance_dialog(frames, f.iloc[rows[0]])
+    picked_row = selected_row(sel, "change_events")
+    if picked_row is not None:
+        row = f.iloc[picked_row]
+        number = txt(row.get("contract_number"), "")
+        if number:
+            contract_dialog(frames, df, number, event=row)
+        else:
+            # 6 events in the corpus state no contract number at all. They belong to
+            # no contract, so there is nothing to navigate to -- show the event.
+            award_dialog(frames, row)
 
 
-# ---------------------------------------------------------------------------------
-# View 2 -- company view
-# ---------------------------------------------------------------------------------
+def view_contracts(frames, df):
+    """Tab 2 -- contracts, the aggregate a company actually holds."""
+    con = frames.get("contracts")
+    if con is None or con.empty:
+        empty_state("contracts", "Contracts appear here once the pipeline has rolled "
+                                 "award events up into the vehicles they act on.")
+        return
+
+    with st.popover("Filters", width="content"):
+        only_multi = st.toggle("Only contracts with a history", value=False,
+                               key="ct_multi",
+                               help="More than one event recorded against the vehicle.")
+        tickers_only = st.toggle("Listed companies only", value=False, key="ct_listed")
+        incomplete = st.toggle("Only where history predates our window", value=False,
+                               key="ct_incomplete",
+                               help="The earliest event we hold is a modification, so "
+                                    "the contract's opening value is unknown.")
+
+    # Contracts store the holder as filed; the reader wants the resolved parent.
+    f = con.copy()
+    ent = frames.get("entities")
+    if ent is not None and not ent.empty:
+        f = f.merge(ent[["contractor_raw", "parent_company"]].drop_duplicates(
+            "contractor_raw"), on="contractor_raw", how="left")
+    if only_multi:
+        f = f[pd.to_numeric(f["n_events"], errors="coerce") > 1]
+    if tickers_only:
+        f = f[f["ticker"].notna()]
+    if incomplete:
+        f = f[f["history_complete"] == False]        # noqa: E712 -- pandas mask
+    f = f.sort_values(["total_actioned_usd", "n_events"], ascending=[False, False],
+                      na_position="last")
+
+    metric_row([
+        ("Contracts", f"{len(f):,}"),
+        ("With a history", f"{int((pd.to_numeric(f['n_events'], errors='coerce') > 1).sum()):,}"),
+        ("Companies", f"{f['ticker'].nunique():,}"),
+        ("Actioned", usd(f["total_actioned_usd"].sum(min_count=1))),
+    ])
+
+    if f.empty:
+        st.warning("No contracts match these filters.")
+        return
+
+    with st.container(key="maintable_contracts"):
+        sel = show_table(pd.DataFrame({
+            "Contract": f["contract_number"].map(txt),
+            "Ticker": f["ticker"].map(ticker_link),
+            "Company": display_company(f) if "parent_company" in f.columns
+                       else f["contractor_raw"].map(txt),
+            "Events": f["n_events"],
+            "Mods": f["n_modifications"],
+            "Initial": f["initial_value_usd"].map(usd),
+            "Actioned": f["total_actioned_usd"].map(usd),
+            "Ceiling": f["ceiling_usd"].map(usd),
+            "First": f["first_event_date"].map(pretty_date),
+            "Last": f["last_event_date"].map(pretty_date),
+            "History": f["history_complete"].map(
+                lambda v: "complete" if v is True else "opens earlier"),
+        }), height=520, key="contracts_table", select=True,
+            column_config={
+                "Ticker": TICKER_COL,
+                "Events": st.column_config.NumberColumn("Events", format="%d"),
+                "Mods": st.column_config.NumberColumn("Mods", format="%d"),
+            })
+
+    picked = selected_row(sel, "contracts_table")
+    if picked is not None:
+        contract_dialog(frames, df, txt(f.iloc[picked]["contract_number"], ""))
+
 
 def view_company(frames, df):
     if df.empty:
@@ -1210,10 +1741,16 @@ def main() -> None:
     st.sidebar.title("DoD Contract Terminal")
     st.sidebar.caption(f"contract v{schemas.SCHEMA_VERSION} · read-only · no model calls")
 
-    if st.sidebar.button("Reload data", width="stretch"):
-        st.cache_data.clear()
-
     stamp = _fingerprint()
+    live = st.sidebar.toggle(
+        "Live", value=True,
+        help="Watch the exports and refresh as the pipeline writes. Turn off to hold "
+             "the current view steady while you read.")
+    if live:
+        data_watcher(stamp)
+        st.sidebar.caption(f"live · checked every {WATCH_SECONDS:.0f}s")
+    else:
+        st.sidebar.caption("paused · showing a fixed snapshot")
     loaded = {t: load_table(t, stamp) for t in UI_TABLES}
     frames = {t: v[0] for t, v in loaded.items()}
     found = [t for t, v in loaded.items() if v[2] == "found" and not v[0].empty]
@@ -1247,23 +1784,32 @@ def main() -> None:
 
     # A ticker cell is a link carrying ?ticker=XX. Consume it here, open the modal,
     # and clear it so a rerun does not reopen the same dialog forever.
+    # Navigation between modals goes through the URL, because Streamlit cannot open a
+    # dialog from inside one. Each param is consumed immediately so a later rerun does
+    # not reopen the same view forever. A contract link wins over a ticker link when
+    # both somehow appear: it is the more specific destination.
     picked_ticker = st.query_params.get("ticker")
+    picked_contract = st.query_params.get("contract")
     if picked_ticker:
         del st.query_params["ticker"]
+    if picked_contract:
+        del st.query_params["contract"]
 
     if demo:
         st.warning("SYNTHETIC DEMO DATA — not real awards", icon=":material/science:")
 
     df = enrich(frames)
 
-    if picked_ticker:
+    if picked_contract:
+        contract_dialog(frames, df, str(picked_contract))
+    elif picked_ticker:
         ticker_dialog(frames, df, str(picked_ticker))
 
-    tabs = st.tabs(["Events", "Awards", "Companies", "Review", "Agents"])
+    tabs = st.tabs(["Events", "Contracts", "Companies", "Review", "Agents"])
     with tabs[0]:
         view_events(frames, df)
     with tabs[1]:
-        view_feed(frames, df)
+        view_contracts(frames, df)
     with tabs[2]:
         view_company(frames, df)
     with tabs[3]:

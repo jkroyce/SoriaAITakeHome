@@ -777,16 +777,24 @@ def _review_item(rec: dict, reason: str) -> dict:
     return item
 
 
-def _run_batches(reps: list[str], llm, model: str, system: str, batch_size: int
-                 ) -> tuple[dict[str, dict], list[str]]:
+def _run_batches(reps: list[str], llm, model: str, system: str, batch_size: int,
+                 on_batch=None) -> tuple[dict[str, dict], list[str]]:
     """Resolve representative names on `model`. Returns (rep -> record, pending reps).
 
     One call per batch. Never one call per raw variant -- that is the caller's job to
     keep true by only ever passing representatives.
+
+    `on_batch(chunk, out)` fires after EVERY batch -- success, replay miss and failure
+    alike -- so a caller can report progress and persist partial results while a long
+    queue is still running. It fires in a `finally`, because a batch that failed still
+    advanced the queue and the caller still needs to know. A callback that raises is
+    reported and swallowed: losing a batch the run already paid for because a progress
+    printer threw would be a strictly worse bug than no progress at all.
     """
     out: dict[str, dict] = {}
     pending: list[str] = []
-    for chunk in batches(reps, batch_size):
+
+    def _one(chunk: list[str]) -> None:
         prompt = build_prompt(chunk)
         schema = batch_schema()
         max_tokens = _max_tokens(len(chunk))
@@ -804,14 +812,14 @@ def _run_batches(reps: list[str], llm, model: str, system: str, batch_size: int
                 out[rep] = _placeholder(
                     rep, model, cache_key,
                     f"unresolved: no cached call ({cache_key[:12]}); needs a live run")
-            continue
+            return
         except Exception as exc:                   # a bad batch must not sink the rest
             sys.stderr.write(f"! tier 2 call failed ({type(exc).__name__}: {exc})\n")
             pending.extend(chunk)
             for rep in chunk:
                 out[rep] = _placeholder(rep, model, cache_key,
                                         f"call failed: {type(exc).__name__}: {exc}")
-            continue
+            return
 
         aligned = _align((got or {}).get("entities") or [], chunk)
         for rep in chunk:
@@ -822,6 +830,16 @@ def _run_batches(reps: list[str], llm, model: str, system: str, batch_size: int
                                         "model returned no entry for this name")
                 continue
             out[rep] = _coerce(item, rep, model, cache_key)
+
+    for chunk in batches(reps, batch_size):
+        try:
+            _one(chunk)
+        finally:
+            if on_batch is not None:
+                try:
+                    on_batch(chunk, out)
+                except Exception as exc:
+                    sys.stderr.write(f"! on_batch failed: {type(exc).__name__}: {exc}\n")
     return out, pending
 
 
@@ -830,12 +848,17 @@ def resolve(names, llm, *, model: str | None = None,
             map_path: pathlib.Path = ENTITY_MAP_PATH,
             universe_path: pathlib.Path = UNIVERSE_PATH,
             batch_size: int = BATCH_SIZE, persist: bool = True,
-            refresh: bool = False) -> ResolveResult:
+            refresh: bool = False, on_progress=None) -> ResolveResult:
     """Full tiered resolution with escalation, review routing and persistence.
 
     `records` is keyed by the RAW printed name and every row's contractor_raw is that
     same raw string -- that is the join key src/store.py uses. Model work is done once
     per NORMALIZED company and fanned out.
+
+    `on_progress(done, total, rows)` is optional and reports the tier-2 pass batch by
+    batch, with `rows` ALREADY FANNED OUT to raw variants -- i.e. real `entities` rows
+    the caller can persist immediately. Only the main pass reports; escalation is a
+    short tail whose improved rows land in the final result anyway.
     """
     model = model or BULK_MODEL
     escalate_model = escalate_model or JUDGE_MODEL
@@ -859,8 +882,25 @@ def resolve(names, llm, *, model: str | None = None,
         for raw in variants_of.get(rep, [rep]):
             records[raw] = _for_raw(rec, raw)
 
+    # Progress is reported in the caller's currency -- entities rows keyed on the RAW
+    # name -- not in the resolver's internal one (representatives). The fan-out has to
+    # happen here because `variants_of` lives here.
+    _done = 0
+
+    def _report(chunk: list[str], so_far: dict[str, dict]) -> None:
+        nonlocal _done
+        _done += len(chunk)
+        if on_progress is None:
+            return
+        rows = [_for_raw(rec, raw)
+                for rep in chunk
+                if (rec := so_far.get(rep)) is not None
+                for raw in variants_of.get(rep, [rep])]
+        on_progress(min(_done, len(queue)), len(queue), rows)
+
     system = build_system(u)
-    resolved, pending = _run_batches(queue, llm, model, system, batch_size)
+    resolved, pending = _run_batches(queue, llm, model, system, batch_size,
+                                     on_batch=_report)
 
     # -- escalation: confidence < 0.7 gets one retry on the judge model --
     escalated: dict[str, dict] = {}
@@ -963,6 +1003,11 @@ class ResolveEntityAgent:
     """name / detects(conn) / run(items, llm) / skills_path() -- nothing else needed."""
 
     name = "resolve_entity"
+
+    #: This agent batches 25 names per call, so the manager must NOT chunk it -- that
+    #: turns one call into 25. It reports progress from inside `run()` instead, which
+    #: is what `supports_progress` advertises. See resolve()'s `on_progress`.
+    supports_progress = True
 
     def skills_path(self) -> pathlib.Path:
         return SKILLS_PATH
@@ -1133,10 +1178,33 @@ def _check_repo_invariants() -> int:
                      f"src/schemas.py still prints the contract "
                      f"({r.stdout.splitlines()[0] if r.stdout else r.stderr[:60]!r})")
 
-    d = subprocess.run(["git", "diff", "main", "--", "src/schemas.py"],
+    # The contract may be unfrozen by the project owner (see its CHANGES log), so the
+    # invariant worth guarding is not "never changed" -- it is that no local change to
+    # the contract has altered a PROMPT, because that silently invalidates the
+    # committed cache and forces re-extraction at real cost. Compare this agent's
+    # prompt projection against the one on `main`.
+    d = subprocess.run(["git", "show", "main:src/schemas.py"],
                        capture_output=True, text=True, cwd=str(root))
-    fails += not _ok(d.returncode == 0 and d.stdout.strip() == "",
-                     "git diff main -- src/schemas.py is empty (frozen file untouched)")
+    if d.returncode != 0:
+        fails += not _ok(True, "no `main` to compare the contract against (skipped)")
+    else:
+        import types
+        ref = types.ModuleType("_schemas_main")
+        # dataclasses resolves a class's module through sys.modules, so a synthetic
+        # module must be registered there before `@dataclass` in the contract runs.
+        sys.modules["_schemas_main"] = ref
+        try:
+            exec(compile(d.stdout, "main:src/schemas.py", "exec"), ref.__dict__)
+            same = all(
+                ref.object_schema(getattr(ref, n)) == schemas.object_schema(getattr(schemas, n))
+                for n in ("AWARD_FIELDS", "ENTITY_FIELDS", "MATERIALITY_FIELDS"))
+            fails += not _ok(same, "no contract edit changed a prompt schema "
+                                   "(the committed cache still replays)")
+        except Exception as exc:
+            fails += not _ok(False, f"could not compare contracts: "
+                                    f"{type(exc).__name__}: {exc}")
+        finally:
+            sys.modules.pop("_schemas_main", None)
 
     # The SDK name is assembled from parts so that a reviewer grepping src/ for the
     # forbidden import still matches src/llm.py and nothing else -- not even this file.
@@ -1181,8 +1249,15 @@ def _check_join() -> int:
                      f"({','.join('?' * len(awd_cols))})", [row[c] for c in awd_cols])
 
     # Resolve the two spellings the way the manager would, then store them raw.
+    # The map path MUST be a scratch file: this section asserts that normalization
+    # collapses the two spellings into ONE model call, and the real
+    # data/entity_map.json now contains this very company, so reading it would make
+    # the call count 0 and the check would pass or fail on ambient state instead of on
+    # the invariant. Every other section already isolates this way.
+    import tempfile
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix="resolve_join_")) / "join.json"
     stub = _StubLLM()
-    recs = resolve_names([starred, plain], stub, persist=False)
+    recs = resolve_names([starred, plain], stub, persist=False, map_path=scratch)
     for rec in recs.values():
         conn.execute(f"INSERT INTO entities ({','.join(ent_cols)}) VALUES "
                      f"({','.join('?' * len(ent_cols))})", [rec[c] for c in ent_cols])

@@ -1,0 +1,312 @@
+{
+  "label": "resolve_entity x25 @claude-haiku-4-5",
+  "model": "claude-haiku-4-5",
+  "created_at": "2026-09-02T16:03:22+00:00",
+  "key_inputs": {
+    "system": "You resolve U.S. Department of War contract-announcement contractor names to public companies, for an equity-research terminal.\n\nEach name below was printed in a daily contract announcement. For each one, decide\nwhether it maps to a listed company and how.\n\nWHAT MATTERS MOST\n* Most DoD contractors are small PRIVATE firms: engineering shops, construction\n  outfits, logistics providers, 8(a) and small-business awardees. Only awards above\n  $7.5M are published, which is well within reach of a company nobody has heard of.\n  `relationship=\"private\"`, `ticker=null`, `is_public=false` is a CORRECT and COMMON\n  answer. Give it confidently when it is right. Do NOT force a match onto a public\n  company because the names rhyme.\n* Resolve to the ULTIMATE public parent, not the operating unit. Rockwell Collins is\n  RTX. Sikorsky is Lockheed Martin. Put the unit in `normalized_name`, the listed\n  entity in `parent_company`, the exchange ticker in `ticker`, and set\n  `relationship=\"subsidiary\"`.\n* `relationship` is one of: direct, subsidiary, joint_venture, private, unknown. direct = the raw name IS the\n  listed company; subsidiary = a unit or acquired company of one.\n* `normalized_name`: the company name with legal-form suffixes (Inc, LLC, Corp, Co.,\n  Ltd, a leading \"The\") and the small-business asterisk removed. Never null.\n* `reasoning`: ONE sentence saying how you know. Name the acquisition or the parent.\n* `confidence` is used, not decorative. Below 0.7 this result is re-run on a\n  stronger model and then shown to a human, which is exactly what should happen when\n  you are guessing. Calibrate: 0.95+ you are certain; 0.8 confident; 0.6 plausible;\n  0.3 a guess. A truthful 0.5 is far more useful than a confident wrong ticker. Never\n  report high confidence on a company you do not actually recognise -- an unfamiliar\n  name is evidence of \"private\", and if you cannot tell, say `unknown` with low\n  confidence.\n* If a name may have changed ownership after your knowledge cutoff, resolve to the\n  ownership you know, cap confidence at 0.65, and say so in `reasoning`.\n* A foreign-listed parent is still public: give its primary-listing ticker and name\n  the exchange in `reasoning`.\n\nTICKERS ALREADY KNOWN TO THE SYSTEM (prefer these when they apply; you are not\nlimited to them -- any correctly listed company may be returned):\n  LMT   Lockheed Martin Corporation  [aliases: Lockheed Martin, Lockheed Martin Corp, Lockheed Martin Aeronautics, Lockheed Martin Rotary and Mission Systems, Sikorsky Aircraft]\n  RTX   RTX Corporation  [aliases: RTX, Raytheon, Raytheon Company, Raytheon Technologies, Rockwell Collins, Collins Aerospace, Pratt & Whitney, Pratt and Whitney]\n  GD    General Dynamics Corporation  [aliases: General Dynamics, General Dynamics Land Systems, General Dynamics Mission Systems, General Dynamics Information Technology, GDIT, Electric Boat, Bath Iron Works, Gulfstream Aerospace]\n  NOC   Northrop Grumman Corporation  [aliases: Northrop Grumman, Northrop Grumman Systems, Northrop Grumman Aeronautics Systems, Orbital ATK]\n  LHX   L3Harris Technologies Inc  [aliases: L3Harris, L3 Harris, Harris Corporation, L3 Technologies, Aerojet Rocketdyne]\n  BA    The Boeing Company  [aliases: Boeing, Boeing Company, Boeing Defense, Boeing Defense Space and Security]\n  HII   Huntington Ingalls Industries Inc  [aliases: Huntington Ingalls, Newport News Shipbuilding, Ingalls Shipbuilding, Mission Technologies]\n  LDOS  Leidos Holdings Inc  [aliases: Leidos, Leidos Inc, Leidos Innovations, Dynetics]\n  CACI  CACI International Inc  [aliases: CACI, CACI Inc, CACI Inc-Federal, CACI International]\n  SAIC  Science Applications International Corporation  [aliases: SAIC, Science Applications International]\n  BAH   Booz Allen Hamilton Holding Corporation  [aliases: Booz Allen, Booz Allen Hamilton, Booz Allen Hamilton Inc]\n  PLTR  Palantir Technologies Inc  [aliases: Palantir, Palantir Technologies, Palantir USG]\n\nNames already covered by that alias table never reach you: they are resolved\ndeterministically for free. Everything you are asked about failed that lookup, so\nexpect a high proportion of genuinely private companies.\n\nLEARNED RULES (sk-5c88474c)\n# skills/entity_resolution.md\n\nLearned procedural rules for mapping a raw contractor name to a public company.\nAppend-only. Every rule cites the case that motivated it. This file is injected into\nthe tier-2 prompt, so editing it invalidates the entity-resolution LLM cache — that is\ndeliberate (see CLAUDE.md, \"Writing skills for yourself\").\n\nTier 1 (deterministic alias match against `data/universe.csv`) never reads this file;\na dictionary lookup cannot be wrong in a way a prose rule would fix. These rules exist\nfor tier 2 only — except R-007, which is a rule about the code itself.\n\n---\n\n## R-001 · most DoD contractors are private, and that is the right answer\nThe publication threshold is $7.5M, which is well inside the range of a small\nengineering, construction or logistics firm. When a name is not a recognisable listed\ncompany or a division of one, answer `relationship=\"private\"`, `ticker=null`,\n`is_public=false` with high confidence. Do not reach for a same-sounding public\ncompany. A confident \"private\" is a correct resolution, not a failure.\n\n- learned_from: \"AAECON General Contracting LLC\" and similar small-business (`*`)\n  entries in the 50-day backfill\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.95\n\n## R-002 · resolve to the ULTIMATE public parent, not the operating unit\nAnnouncements print the operating company as contracted. Map through to whatever is\nactually listed and say so in `reasoning`: put the operating unit in\n`normalized_name`, the listed entity in `parent_company`, and set\n`relationship=\"subsidiary\"`.\n\n- learned_from: \"Rockwell Collins Inc.\" → RTX Corporation (RTX); acquired by Raytheon\n  in 2018, Raytheon Technologies renamed RTX in 2023\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.97\n\n## R-003 · legal-suffix noise carries no information\n`Inc`, `Inc.`, `Incorporated`, `LLC`, `L.L.C.`, `Corp`, `Corp.`, `Corporation`,\n`Co.`, `Company`, `Ltd`, `LP`, `LLP`, `PLC`, a leading `The`, and a trailing `*`\n(the small-business marker) are stripped before matching and must not appear in\n`normalized_name`. \"The Boeing Co.\" and \"Boeing Company\" are the same entity.\n\n- learned_from: \"The Boeing Co., Seattle, Washington\" (announcement 4523515)\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.99\n\n## R-004 · joint ventures get `joint_venture`, not a coin flip\nA name containing \"JV\", \"Joint Venture\", or two recognisable primes joined by `/`,\n`-` or `and` is a joint venture. If exactly one parent is public, give that ticker\nwith `relationship=\"joint_venture\"` and confidence no higher than 0.75, because the\nrevenue split is not disclosed. If neither or both are public, prefer `ticker=null`\nand explain in `reasoning`. Tier 1 refuses these deterministically (`_JV_RE`) rather\nthan letting an alias prefix claim them.\n\n- learned_from: recurring pattern in Army construction MATOC pools across the 50-day\n  backfill; no single announcement id\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.70\n\n## R-005 · post-cutoff ownership changes are an honesty problem, not a guess\nDefence ownership changes often (L3 + Harris 2019, Raytheon + United Technologies\n2020, Aerojet Rocketdyne → L3Harris 2023). If a name might have changed hands after\nyour knowledge cutoff, resolve to the last ownership you actually know, cap\n`confidence` at 0.65 so the manager escalates, and name the uncertainty in\n`reasoning`.\n\n- learned_from: design review of the escalation path (confidence < 0.7 → Opus → human)\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.80\n\n## R-006 · a division name is not a new company\n\"Lockheed Martin Rotary and Mission Systems\", \"General Dynamics Land Systems\" and\n\"Northrop Grumman Systems Corp.\" are divisions, and tier 1 already catches them by\nalias prefix. If one reaches tier 2 (a division tier 1 has never seen), resolve it to\nthe prime's ticker with `relationship=\"subsidiary\"` and confidence ≥ 0.9 — the prime's\nname being a prefix of the raw name is strong evidence, not a coincidence.\n\n- learned_from: universe.csv alias lists; the tier-1 prefix rule is the deterministic\n  half of this same idea\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.90\n\n## R-007 · two keys: RAW joins, NORMALIZED is reasoned about\n`entities.contractor_raw` is the join key. `src/store.py` keys the `entities` table on\nit and joins `entities.contractor_raw = awards.contractor_raw`, and agent-extract's\nrule R-004 keeps the small-business trailing `*` in `awards.contractor_raw` \"exactly\nas printed\". So a row's `contractor_raw` must be the printed string byte-for-byte —\nasterisk, `, Inc.`, doubled whitespace and all. Normalizing it makes the join silently\nreturn zero rows.\n\nThe *cache* key is the opposite. `data/entity_map.json`, the tier-2 batch slots and\nthe LLM cache key are all keyed on `normalize(raw)`, so every printed spelling of one\ncompany is reasoned about **once**. The code path is: group raw variants by normalized\nname → pick one `representative()` → resolve that representative once → `_for_raw()`\nfans the single result out to every raw variant, each keeping its own\n`contractor_raw`.\n\nGet this backwards and one company either splits into two entity keys and is paid for\ntwice, or collapses into one row that no award can join to.\n\n- learned_from: this section being restarted after the extract agent's R-004 fixed the\n  asterisk into `contractor_raw`; asserted by selftest check 1, which requires exactly\n  one model call across `\"…Inc.\"` / `\"…Inc.*\"` pairs and two distinct rows out\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.99\n\n## R-008 · a low-confidence answer is escalated once, then handed to a human\nBelow 0.7 the batch is re-run on `claude-opus-5` exactly once. If Opus clears the bar\nits answer replaces the Haiku one and is persisted. If it does not, the uncertain\nrecord is still emitted (so the UI shows something honest) but is **not** written to\n`data/entity_map.json` — persisting a guess would freeze it forever and suppress every\nfuture attempt — and a `review_queue` row is produced instead. The same applies to a\ncache miss under `live=False`: pending is a review case, never a persisted fact.\n\n- learned_from: designing the offline escalation test (stubbed 0.5 → Opus → 0.5)\n  during this restart; CLAUDE.md \"Cleaning-agent protocol\"\n- added: 2026-09-01T00:00Z · by: resolve@design · confidence: 0.90\n\nReturn one object per input name, in the input order, and nothing else.",
+    "prompt": "Resolve these 25 contractor names, one entry each, in this exact order:\n\n1. Canadian Commercial Corp./TransCanada Turbines\n2. Canyon Consulting LLC\n3. Cape Environmental Management Inc.,*\n4. CAPE-APTIM JV1 LLC,*\n5. Carahsoft\n6. Carahsoft Technology Corp.\n7. Carley Corp.\n8. Carlisle Construction LLC,*\n9. Carmen Roofing Services LLC\n10. Carroll's Roofing & Construction LLC\n11. Castelion Corp.,*\n12. Cayuse Native Hawaiian Veterans LLC,*\n13. CCI Facility Contractors LLC\n14. CFM International Inc.\n15. Chance Technologies LLC,*\n16. Charles Stark Draper Laboratories Inc.\n17. Chase Defense\n18. Chatmon Construction LLC\n19. Chemring Sensors and Electronic Systems Inc.\n20. Childs Engineering Corp.*\n21. Chitra Productions LLC,*\n22. Chugach Pacific Services LLC,*\n23. Civil-Military Innovation Institute\n24. Clark Construction Group LLC\n25. Cleveland-Cliffs Steel Corp.\n",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "entities": {
+          "type": "array",
+          "description": "Exactly one entry per input name, in the same order as the numbered list, including names you are unsure about.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "normalized_name": {
+                "type": "string",
+                "description": "Canonical company name, suffixes normalized"
+              },
+              "ticker": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Exchange ticker of the ultimate public parent, null if private"
+              },
+              "parent_company": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Ultimate parent, e.g. Rockwell Collins -> RTX Corporation"
+              },
+              "relationship": {
+                "type": "string",
+                "enum": [
+                  "direct",
+                  "subsidiary",
+                  "joint_venture",
+                  "private",
+                  "unknown"
+                ],
+                "description": "How the raw name relates to the ticker"
+              },
+              "is_public": {
+                "type": "boolean",
+                "description": "True when it maps to a listed company"
+              },
+              "confidence": {
+                "type": "number",
+                "description": "0.0-1.0. Below 0.7 escalates, then flags for review"
+              },
+              "reasoning": {
+                "type": "string",
+                "description": "One sentence on how the mapping was determined"
+              }
+            },
+            "required": [
+              "normalized_name",
+              "ticker",
+              "parent_company",
+              "relationship",
+              "is_public",
+              "confidence",
+              "reasoning"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "entities"
+      ],
+      "additionalProperties": false
+    },
+    "max_tokens": 9400
+  },
+  "usage": {
+    "input_tokens": 3862,
+    "output_tokens": 1843
+  },
+  "output": {
+    "entities": [
+      {
+        "normalized_name": "Canadian Commercial Corp./TransCanada Turbines",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.75,
+        "reasoning": "Canadian Commercial Corporation is a Crown corporation (public entity) but TransCanada Turbines appears to be a joint venture or product line; uncertain whether this is a Canadian public company or private contractor operating in U.S. market."
+      },
+      {
+        "normalized_name": "Canyon Consulting",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small consulting firm with no recognisable link to any listed company; typical of private DoD contractors below the public company threshold."
+      },
+      {
+        "normalized_name": "Cape Environmental Management",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small environmental services contractor; no recognisable connection to any listed company in the DoD contractor universe."
+      },
+      {
+        "normalized_name": "CAPE-APTIM JV1",
+        "ticker": "APTIM",
+        "parent_company": "APTIM Global Services",
+        "relationship": "joint_venture",
+        "is_public": false,
+        "confidence": 0.55,
+        "reasoning": "Joint venture with APTIM as one partner; APTIM appears to be a large engineering firm but its public status is uncertain after knowledge cutoff and this is a JV so confidence is capped low."
+      },
+      {
+        "normalized_name": "Carahsoft",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Large privately held IT reseller and distributor; owned by Vista Equity Partners (private equity) and not publicly listed."
+      },
+      {
+        "normalized_name": "Carahsoft Technology",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Same company as Carahsoft; large private software distributor not listed on any public exchange."
+      },
+      {
+        "normalized_name": "Carley",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small contractor with no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "Carlisle Construction",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small construction firm unrelated to Carlisle Companies Inc. (which manufactures building materials, not construction services)."
+      },
+      {
+        "normalized_name": "Carmen Roofing Services",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.95,
+        "reasoning": "Small roofing contractor typical of local construction services awarded by DoD; no connection to any public company."
+      },
+      {
+        "normalized_name": "Carroll's Roofing & Construction",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.95,
+        "reasoning": "Small local roofing and construction firm; no connection to any listed company."
+      },
+      {
+        "normalized_name": "Castelion",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.85,
+        "reasoning": "Appears to be a small technology or consulting firm with no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "Cayuse Native Hawaiian Veterans",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.95,
+        "reasoning": "Native Hawaiian-owned small business contractor; no connection to any public company."
+      },
+      {
+        "normalized_name": "CCI Facility Contractors",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small facility services and construction contractor; no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "CFM International",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.7,
+        "reasoning": "CFM International is a joint venture between GE Aviation and Safran for aircraft engine manufacturing; joint ventures with two public parents are resolved as private with escalation for human review."
+      },
+      {
+        "normalized_name": "Chance Technologies",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small technology contractor with no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "Charles Stark Draper Laboratories",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.85,
+        "reasoning": "MIT-affiliated independent research center; remains private and not listed on any exchange despite its prominence."
+      },
+      {
+        "normalized_name": "Chase Defense",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.85,
+        "reasoning": "Defense contractor with no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "Chatmon Construction",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.95,
+        "reasoning": "Small local construction firm typical of DoD awards; no connection to any public company."
+      },
+      {
+        "normalized_name": "Chemring Sensors and Electronic Systems",
+        "ticker": "CHR",
+        "parent_company": "Chemring Group PLC",
+        "relationship": "subsidiary",
+        "is_public": true,
+        "confidence": 0.8,
+        "reasoning": "Chemring Sensors is a division of Chemring Group PLC, a UK-listed defence electronics manufacturer; parent listed on London Stock Exchange."
+      },
+      {
+        "normalized_name": "Childs Engineering",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small engineering firm with no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "Chitra Productions",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.9,
+        "reasoning": "Small production or media services firm with no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "Chugach Pacific Services",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.85,
+        "reasoning": "Alaska-based services contractor; no recognisable link to any listed company."
+      },
+      {
+        "normalized_name": "Civil-Military Innovation Institute",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.8,
+        "reasoning": "Non-profit or research institute focused on civil-military innovation; not a commercial entity and not publicly listed."
+      },
+      {
+        "normalized_name": "Clark Construction Group",
+        "ticker": null,
+        "parent_company": null,
+        "relationship": "private",
+        "is_public": false,
+        "confidence": 0.75,
+        "reasoning": "Large private construction company; held by Heatherwood Investors and not publicly listed despite its size."
+      },
+      {
+        "normalized_name": "Cleveland-Cliffs Steel",
+        "ticker": "CLF",
+        "parent_company": "Cleveland-Cliffs Inc.",
+        "relationship": "direct",
+        "is_public": true,
+        "confidence": 0.95,
+        "reasoning": "Cleveland-Cliffs Inc. is the only U.S. steel producer listed on the NYSE; directly matches the stated contractor."
+      }
+    ]
+  }
+}

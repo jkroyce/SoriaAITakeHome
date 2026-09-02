@@ -49,7 +49,8 @@ from config import DATA, DB_PATH, RAW
 
 # Tables an investor (or the UI) reads directly, so they get CSV as well as Parquet.
 # agent_runs and review_queue are operational -- Parquet only.
-CSV_TABLES: tuple[str, ...] = ("awards", "entities", "materiality", "changes", "announcements")
+CSV_TABLES: tuple[str, ...] = ("awards", "entities", "materiality", "changes",
+                               "announcements", "contracts")
 
 
 # --------------------------------------------------------------------------------
@@ -194,7 +195,37 @@ def init_db(path: str | pathlib.Path = DB_PATH) -> duckdb.DuckDBPyConnection:
         path = str(p)
     conn = duckdb.connect(str(path))
     conn.execute(schemas.all_ddl())          # every CREATE is IF NOT EXISTS
+    _add_missing_columns(conn)
     return conn
+
+
+def _add_missing_columns(conn: duckdb.DuckDBPyConnection) -> dict[str, list[str]]:
+    """Bring an existing database up to the current contract. Additive only.
+
+    `CREATE TABLE IF NOT EXISTS` silently does nothing when the table already exists,
+    so a database written under an older contract keeps its old columns and every
+    insert against the new ones fails. This reconciles the two by ADDing what the
+    contract has and the table lacks.
+
+    It never drops or retypes a column: losing data to make a schema match is not a
+    migration, it is an outage. A removed or altered field is a human decision and
+    will surface as a loud error here rather than a quiet deletion.
+    """
+    added: dict[str, list[str]] = {}
+    for table in schemas.TABLES:
+        try:
+            present = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+        except Exception:                    # table genuinely absent; the DDL made it
+            continue
+        if not present:
+            continue
+        types = sql_types(table)
+        missing = [c for c in columns(table) if c not in present]
+        for col in missing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {types[col]}")
+        if missing:
+            added[table] = missing
+    return added
 
 
 def table_names() -> list[str]:
@@ -256,6 +287,10 @@ def upsert_announcements(conn, rows) -> int:
 
 def upsert_awards(conn, rows) -> int:
     return upsert(conn, "awards", rows)
+
+
+def upsert_contracts(conn, rows) -> int:
+    return upsert(conn, "contracts", rows)
 
 
 def upsert_entities(conn, rows) -> int:

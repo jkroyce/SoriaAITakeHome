@@ -4,6 +4,6 @@
 # expected for anyone on macOS or Linux.
 PY := $(shell test -x .venv/bin/python && echo .venv/bin/python || echo python)
 
-.PHONY: setup fetch test contract demo live tick ui chat sessions cost golden
-setup fetch test contract demo live tick ui chat sessions cost golden:
+.PHONY: setup fetch test contract demo trial live tick ui chat sessions cost golden
+setup fetch test contract demo trial live tick ui chat sessions cost golden:
 	@$(PY) run.py $@

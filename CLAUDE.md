@@ -40,8 +40,14 @@ Change detection ("what is new") is a set difference on award UIDs and is delibe
 
 1. **Never call the Anthropic API outside `src/llm.py`.** Always route through
    `CachedLLM`. No `import anthropic` anywhere else.
-2. **Never edit `src/schemas.py`.** It is the frozen contract that lets parallel work
-   integrate. If a field is genuinely missing, stop and say so rather than adding one.
+2. **Never edit `src/schemas.py` on your own initiative.** It is the frozen contract
+   that lets parallel work integrate. If a field is genuinely missing, stop and say so.
+   Only the project owner unfreezes it, and every change is recorded in the CHANGES log
+   at the bottom of that module. Before proposing one, know which kind it is:
+   adding an `llm=False` field leaves every prompt schema byte-identical, so the
+   committed cache still replays and the change is free; adding or altering an
+   `llm=True` field invalidates that agent's cache and forces re-extraction at real
+   cost. Assert the former with a test rather than assuming it.
 3. **Never edit a file you do not own.** See the ownership map below.
 4. **Use `.venv/Scripts/python.exe`.** The `python` on PATH is LibreOffice's bundled
    interpreter — no pip, no venv.
@@ -85,6 +91,7 @@ Exactly one owner per file. Do not cross these lines.
 | Path | Owner | Purpose |
 |---|---|---|
 | `src/schemas.py` | **frozen** | The contract. Generates JSON Schema *and* DuckDB DDL from one field list. |
+| `src/store.py` (migration) | Agent C | `_add_missing_columns` reconciles an existing DB with the contract. Additive only — never drops or retypes. |
 | `src/config.py` | shared, rarely | Hosts, TLS/CA, impersonation, model ids |
 | `src/llm.py` | shared, rarely | `CachedLLM`, cost accounting. The only API caller. |
 | `src/fetch.py` | Section 1 | Deterministic acquisition + provenance sidecars |
@@ -96,6 +103,40 @@ Exactly one owner per file. Do not cross these lines.
 | `src/manager.py` | Wave 2 | Runtime orchestrator |
 | `skills/*.md` | agents write these | Learned procedural rules |
 | `tests/golden/` | Wave 2 | Hand-verified fixtures that gate skill promotion |
+
+## The domain: Company → Contract → Event
+
+```
+Company  1 ──*  Contract  1 ──*  Event
+entities        contracts        awards
+```
+
+A company holds contracts; **events change a contract's value**, and the earliest event
+we hold reads as the contract being created. This is what the UI presents and what the
+tables encode.
+
+`awards` was always the *event* table — its rows are actions (award, modification,
+option exercise, order), never durable objects. `award_uid` identifies a line in a press
+release, so one contract with six actions was six unrelated rows. `contracts` (schema
+1.1.0) is the aggregate root those events belong to.
+
+Every contract column is derived by `GROUP BY`/`MIN`/`MAX`/`SUM` in `manager.build_contracts`.
+**There is no `llm=True` field on `contracts` and there must never be one** — a contract
+is a fact about rows we already hold, not a judgement. The test asserts it.
+
+Three derived columns carry the membership, all `llm=False`:
+
+| Column | Meaning |
+|---|---|
+| `awards.contract_uid` | which contract this event acts on — prefers `base_contract_number`, so a modification lands on the vehicle it amends |
+| `awards.is_creating_event` | earliest surviving event on the contract; what "contract created" means when the source never printed one |
+| `awards.duplicate_of` | a re-announcement of an identical earlier event, excluded from contract totals |
+
+Measured on the 50-document corpus: **1,128 contracts from 1,166 events**, 16 duplicates
+excluded, 24 with multi-event timelines, and **zero contracts whose events resolve to
+more than one company** — so single ownership is a property of the data, not an
+assumption. 197 contracts open before our window; `history_complete=false` says so
+rather than implying a zero opening value.
 
 ## Cleaning-agent protocol
 

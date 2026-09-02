@@ -1,146 +1,108 @@
 # DoD Contract Terminal
 
-Turns the Department of War's daily contract announcements — prose — into queryable
-investment data, and tells an investor when something material changed.
+This grabs Department of War contract announcements — which are published as prose —
+and distills them into a database you can actually query, so an investor can see what
+changed and whether it matters.
 
-The announcements are published as paragraphs of text. A $160,000,000 award split
-across seven companies, a $180,000,000 modification against an existing contract, and
-a footnote defining an asterisk all sit in the same page, with no API and no schema.
+The application first fetches the announcements, then AI agents read them in parallel
+and produce structured rows. Company names are checked against existing logic first,
+and only the ones that logic can't resolve are sent to AI.
 
-```
-"AAECON General Contracting LLC,* Louisville, Kentucky (W912QR-26-D-A044); ...
- will compete for each order of the $160,000,000 firm-fixed-price contract"
-```
+**The structure is: companies have contracts, and contracts have events that change
+their value.** Creating a contract is itself an event, so the whole thing reads as one
+log.
 
-becomes seven rows — one per company, each with its own contract number, each carrying
-the shared ceiling rather than a divided seventh, each keyed to a ticker.
+---
 
-## The thesis
-
-> **An agent reasons once; deterministic code applies that reasoning forever.**
-
-Every model call goes through `CachedLLM` and is keyed by a SHA-256 of its full input.
-The cache is **committed to the repository**. That is not a test fixture — it is the
-architecture. An entity resolved once is never re-reasoned, and refresh cost is
-proportional to *new information*, not corpus size.
-
-Learning happens at three levels, each a reviewable artifact in git:
-
-| Level | Artifact | Learns |
-|---|---|---|
-| Response | `cache/llm/<sha>.json` | this exact call's answer |
-| Facts | `data/entity_map.json` | "Rockwell Collins Inc." → RTX |
-| Procedures | `skills/*.md` | "a multi-award pool emits one row per company" |
-
-### Where reasoning goes, and where it must not
-
-**An agent** decides what needs context and judgement: extracting rows from prose,
-resolving a contractor to a ticker, judging whether a change is material.
-
-**Deterministic code** does everything exact and repeatable: fetching, caching,
-provenance, parsing, normalizing, dedup, diffing, DuckDB, thresholds, sorting, exports,
-UI.
-
-The test: *if a sort, a set difference, or a dictionary lookup would answer it, a model
-call is a bug.* So "what is new" is a set difference on award UIDs and is deliberately
-**not** an agent. Ranking by dollar value is a sort. The agent judges whether a change
-*matters*, never whether one *occurred*.
-
-## Quick start
-
-`make demo` replays the entire pipeline from the committed cache with **no API key and
-no spend**. That is the two-minute path.
+## Run it
 
 ```bash
-python run.py demo       # replay everything from cache, $0.00, no key
-python run.py ui         # Streamlit terminal
-python run.py golden     # score extraction against hand-verified fixtures
-python run.py test       # 66 tests
-python run.py contract   # print the frozen schema
-python run.py cost       # what the cache holds, and what replaying it saves
+python run.py setup      # install dependencies
+python run.py demo       # the whole pipeline from committed data — no API key, $0
+python run.py ui         # the terminal itself
 ```
 
-Use `.venv/Scripts/python.exe`. The `python` on PATH may be another interpreter
-entirely; on the machine this was built on it is LibreOffice's, which has no pip.
+`demo` rebuilds the database from scratch using the 50 committed source documents and
+the committed model responses. It takes about 40 seconds, makes zero API calls, and
+produces:
 
-To refresh against live data you need a key in `.env` (copy `.env.example`):
+```
+50 announcements · 1,182 events · 1,128 contracts · 941 companies
+llm: 0 live calls, 56 cache hits, $0.0000
+```
+
+Those are the same numbers the real paid run produced. Nothing is stubbed — the agents
+genuinely run, they just get their answers from cache instead of the API.
+
+**Want to prove it's real on your own key?**
 
 ```bash
-python run.py tick       # plan and price the queue — ZERO model calls
-python run.py live       # the paid pass, hard-capped by --max-spend (default $5)
+echo "ANTHROPIC_API_KEY=sk-ant-..." > .env    # gitignored
+python run.py trial                            # one fresh document, live, capped at $0.25
 ```
 
-`tick --dry-run` replaces `CachedLLM.json_call` with a raising guard for the whole run,
-so "zero calls" is enforced rather than asserted.
+That fetches today's announcements and processes one document the cache has never
+seen. It's the honest answer to "is the cache just a fixture?"
 
-## Architecture
+Full run over all 50 documents is `python run.py live` (~$2.35, capped at $5.00).
 
-```
-war.gov  ──►  fetch.py  ──►  raw/*.html + *.prov.json     deterministic, cached
-                                   │
-                                   ▼
-                              extract.py            prose ──► award rows      (agent)
-                                   │
-                                   ▼
-                          resolve_entity.py         name  ──► ticker          (agent)
-                                   │
-                                   ▼
-                        score_materiality.py        award ──► 0-100           (agent)
-                                   │
-                                   ▼
-                              store.py  ──►  DuckDB  ──►  Parquet/CSV
-                                   │
-                                   ▼
-                                app.py                Streamlit
-```
+---
 
-`manager.py` is the only orchestrator: survey → queue → dispatch → escalate → record.
-Routing is deterministic; an award with no ticker goes to the resolver because that is
-a lookup, not a judgement. Confidence below 0.7 retries on Opus, and still-uncertain
-rows land in `review_queue` for a human. Every dispatch is recorded in `agent_runs`
-with tokens, cost, cache hit and skills version.
+## What I decided, and why
 
-Agents are **discovered**, not registered: any module in `src/agents/` exposing
-`name` / `detects` / `run` / `skills_path` is picked up. Adding a cleaning agent is
-adding one file.
+**I wanted the AI confined to judgement.** The UI, the fetching, and the storage are
+deterministic. So is working out *what changed* — that's a set difference on IDs, not
+something worth paying a model for. The AI reads prose, resolves ambiguous company
+names, and decides whether an award actually matters to an investor. Everything else
+is code.
 
-### The contract
+**Company names hit a dictionary before they hit the API.** Of 941 distinct
+contractors, 56 resolved for free against a known-aliases list, and every name resolved
+once is written to `data/entity_map.json` and never reasoned about again. Re-running
+the whole corpus now costs $0.
 
-`src/schemas.py` is frozen. One field list generates **both** the JSON Schema sent to
-the model and the DuckDB DDL, so the two projections cannot drift — and a test proves
-it. Fields marked `llm=False` (ids, timestamps, `llm_cache_key`, `skills_version`)
-never appear in a prompt and are always filled by code.
+**Every model response is cached by a hash of its exact input, and the cache is
+committed.** That's why `demo` works with no key. It also means the refresh cost is
+proportional to genuinely new information rather than to corpus size — tomorrow's
+announcement costs a few cents, not another full run.
 
-### Self-improvement, and why it is falsifiable
+**I used a multi-agent flow to build it**, to see what a startup would do for speed.
+Sections were built in parallel against a frozen data contract (`src/schemas.py`) so
+they could integrate without merge conflicts in data form.
 
-When an agent handles a case badly it distils an append-only rule into `skills/*.md`,
-citing the announcement that motivated it. Those rules are injected into later prompts.
+**I put a lot of weight on token cost and monitoring**, more than the problem strictly
+needed, because I wanted to keep my own usage down. That added complexity — batching,
+spend caps, a cost estimate before anything is called — but it's the constraint I
+chose.
 
-That is also the most dangerous part of the design, because a self-modifying prompt can
-silently degrade. So promotion is gated:
+---
 
-- `manager promote-skills` is explicit, never automatic.
-- A candidate is verified against a **copy**; the live file is written only once the
-  gate is green. The skills file is part of the prompt and the cache is keyed on the
-  prompt, so a crash between write and revert would silently invalidate every cached
-  response.
-- A rule is accepted only if it does not regress `tests/golden/` — hand-verified
-  fixtures whose expected values are quoted from the source prose. A deliberately bad
-  rule is **rejected**, and that rejection is itself a test.
-- Promotion reports the re-extraction cost *before* doing it.
+## Limits I set to avoid scope creep
 
-## Verified source facts
+- No second AI verification layer over the extraction.
+- No real tooling for reporting or working through low-confidence entries — they're
+  detected and queued (23 of them), but a human would have to go read the queue.
+- 50 weekdays of announcements. Most modifications reference contracts awarded years
+  earlier, so ~93% of them have no parent in the window. The system says so
+  (`history_complete = false`) rather than pretending the contract starts at zero.
 
-| Fact | Detail |
+---
+
+## Layout
+
+| Path | What it is |
 |---|---|
-| Host | `www.war.gov`; `defense.gov` redirects here after the rebrand |
-| Access | Akamai fingerprints the **TLS handshake**. `requests` with a perfect Chrome header set still gets 403; `curl_cffi` with `impersonate="chrome"` gets 200 |
-| Listing | Server-rendered into Vue attributes — no JS execution, no API reversing |
-| Threshold | Only awards above $7.5M are published |
-| Prior art | None. The one comparable project targets a URL scheme dead since ~2015 |
+| `src/schemas.py` | The data contract. One field list generates both the JSON schema sent to the model and the DuckDB DDL. |
+| `src/fetch.py` | Acquisition. war.gov fingerprints the TLS handshake, so this uses `curl_cffi`. |
+| `src/agents/` | The three agents: extract, resolve entity, score materiality. |
+| `src/manager.py` | Orchestration, spend caps, change detection, contract aggregation. |
+| `app.py` | The Streamlit terminal. |
+| `cache/llm/` | Every model response, keyed by input hash. Committed on purpose. |
+| `skills/` | Rules the agents wrote for themselves after getting cases wrong. |
+| `tests/golden/` | Hand-verified fixtures that gate whether a new rule is accepted. |
 
-## Cost
-
-Haiku for bulk work, Opus only on low-confidence escalation. The cache is committed, so
-replay is free and reproducible for anyone who clones the repo.
-
+```bash
+python run.py test       # 70 tests
+python run.py golden     # extraction scored against hand-verified fixtures
+python run.py cost       # what the cache holds and what it saved
+```

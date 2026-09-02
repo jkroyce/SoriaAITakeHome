@@ -1,0 +1,461 @@
+{
+  "label": "extract:4576619",
+  "model": "claude-haiku-4-5",
+  "created_at": "2026-09-02T15:39:18+00:00",
+  "key_inputs": {
+    "system": "You are a contract-analysis extractor for a defense-investment research terminal. You read one day's U.S. Department of War contract announcement and return every award in it as structured JSON matching the supplied schema exactly. You are precise, you never invent a value that is not in the text, and you report honest confidence -- a truthful 0.5 is far more useful to this system than a confident wrong answer, because anything below 0.7 is routed to a human reviewer.",
+    "prompt": "# Task\n\nExtract EVERY award in the announcement below into the `awards` array, in the order\nthey appear, then write one `document_notes` string about the document as a whole\n(or null if there is nothing a reviewer needs to know).\n\n# What counts as one row\n\nOne row per CONTRACTOR-AWARD, not one row per paragraph.\n\n* An ordinary paragraph naming one company and one dollar figure is ONE row.\n* A paragraph that lists several companies -- each with its own contract number in\n  parentheses -- competing for orders under ONE shared dollar ceiling is a\n  MULTI-AWARD POOL: emit ONE ROW PER COMPANY. Seven companies means seven rows.\n* Never merge two companies into one row. Never split one company into two rows.\n* The `*Small business` legend at the foot of the document is a footnote, not an\n  award. Section headers are not awards.\n\n# Field rules\n\n* `service_branch` -- the ALL-CAPS section header the award sits under. Headers are\n  on their own line and every award inherits the nearest header ABOVE it until the\n  next header appears. Use the enum value that matches the header exactly; if no enum\n  value matches (for example `U.S. SPECIAL OPERATIONS COMMAND`), use `OTHER` and put\n  the literal header text in `extraction_notes`.\n* `contractor_raw` -- the name EXACTLY as printed, including `Inc.`, `LLC`, `Corp.`\n  and any trailing asterisk. Do not clean it up, expand it, or resolve it to a parent\n  company: entity resolution is a different agent's job and it needs the raw string.\n* `contractor_city` / `contractor_state` -- as printed, e.g. `Bristol` /\n  `Pennsylvania`. Null when the entry gives none.\n* `amount_usd` -- the value of THIS action, in whole dollars, as an integer with no\n  `$`, commas or decimals ($180,000,000 -> 180000000). In order of preference:\n  \"The amount of this action is $X\" -> X; otherwise the figure in the award phrase\n  (\"was awarded a $X ... contract\") -> X; for a multi-award pool, the shared ceiling.\n  Money that is NOT `amount_usd`: obligation amounts (\"funds in the amount of $X were\n  obligated at the time of award\"), maximum/option values (\"The maximum dollar value,\n  including the base price and 13 options, is $Y\"), and cumulative face values.\n* `action_type` -- exactly one of:\n  - `multi_award_pool`: several companies compete for orders under one shared vehicle\n    (takes precedence over `new_award` for every company in the pool)\n  - `option_exercise`: the text says the action exercises an option\n  - `modification`: a modification, amendment or change to an existing contract that\n    is not an option exercise\n  - `new_award`: everything else, including a task order placed under an existing IDIQ\n* `contract_number` -- this contractor's own number, usually in parentheses at the end\n  of the entry, e.g. `W15QKN-26-D-A084`. In a multi-award pool it is the number\n  printed next to THAT company, never a sibling's. For a modification with no new\n  number of its own, repeat the base contract number. Null if genuinely absent.\n* `base_contract_number` -- for a modification, option exercise, or task order: the\n  underlying contract being modified or ordered against. Null for a plain new award.\n* `modification_number` -- the token in parentheses right after the word\n  \"modification\", e.g. `P00002`, `P00005`, `001 CB`. Null when there is none.\n* `cumulative_face_value_usd` -- the total AFTER this action, when stated (\"with a\n  total cumulative face value of $280,000,000\", \"brings the total cumulative face\n  value of the contract to $165,655,369\"). Integer, whole dollars. Null otherwise.\n* `pricing_type` -- the pricing arrangement as printed, lowercased, e.g.\n  `firm-fixed-price`, `cost-plus-fixed-fee`, `firm-fixed-price, indefinite-delivery/\n  indefinite-quantity`. Null when not stated.\n* `is_idiq` -- true when the entry says indefinite-delivery/indefinite-quantity,\n  indefinite delivery-indefinite quantity, IDIQ, or describes orders placed under the\n  contract. False when it is plainly a single definite contract.\n* `is_multi_award` -- true when several companies will compete for orders under one\n  shared vehicle. True on EVERY row of a pool, false on an ordinary single award.\n* `work_description` -- what the contract is for, condensed to ONE sentence in your\n  own words. No boilerplate about funding or bids.\n* `place_of_performance` -- where work is performed, as printed. When the entry says\n  locations are set per order, record that (e.g. \"Work locations and funding will be\n  determined with each order\").\n* `completion_date` -- the estimated completion date as printed, free text, e.g.\n  `Aug. 31, 2031` or `July 2028`. Do not reformat it.\n* `contracting_activity` -- the contracting activity and its location, e.g.\n  `Army Contracting Command, Newark, New Jersey`.\n* `bids_solicited` / `bids_received` -- only what is actually stated. \"One bid was\n  solicited with one received\" -> 1 / 1. \"Bids were solicited via the internet with 19\n  received\" -> null / 19 (the solicited count is NOT stated). \"competitively procured\n  via the SAM.gov website, with 14 offers received\" -> null / 14. Never infer a\n  solicited count from a received count and never write 0 for \"not stated\".\n* `small_business` -- true when the entry carries the asterisk marker. Within a pool\n  this differs company by company: only the asterisked companies are small businesses.\n* `extraction_confidence` -- 0.0-1.0, honest. Guidance:\n  - 0.95+ a plain, complete entry: one company, one amount, one contract number\n  - 0.80-0.94 you had to make one judgement call (which action type, which of several\n    dollar figures, a pool split)\n  - 0.60-0.79 something is genuinely ambiguous or a key field is missing\n  - below 0.6 you are guessing\n  Below 0.7 sends the row to a human, so do not inflate it -- but do not deflate a\n  clean entry either, because that wastes a reviewer's attention.\n* `extraction_notes` -- what an ambiguous entry needs a reviewer to know. Empty string\n  or null when the entry was unambiguous. Do not restate the work description here.\n\n# Fields you must NOT produce\n\nIds, dates and provenance (`award_uid`, `announcement_id`, `announced_date`,\n`extracted_at`, `extractor_model`, `llm_cache_key`, `skills_version`) are computed by\ndeterministic code after you answer. They are not in your schema. Do not invent them.\n\n# Output\n\nReturn JSON matching the schema exactly: every property present on every award, using\n`null` for a value the text does not give. Never drop a key, never add one.\nFive fields cannot be null because a DoD announcement always states them:\n`contractor_city`, `contractor_state`, `work_description`,\n`place_of_performance`, `contracting_activity`. If one is genuinely absent,\ngive an empty string \"\" -- never invent a value to fill it.\n\n\n# Learned rules (skills/extraction.md)\n\nThese were distilled from earlier documents by this same agent and reviewed before promotion. They override the general guidance above where they conflict.\n\n# skills/extraction.md — learned extraction rules\n\nAppend-only. Every rule cites the announcement that motivated it. These rules are\ninjected verbatim into the extraction prompt, which means **editing this file changes\nthe cache key and forces re-extraction of every document.** Promotion is gated\n(`manager promote-skills`) and a candidate rule is accepted only if it does not\nregress `tests/golden/`.\n\nRule ids are stable. Never renumber, never delete — supersede.\n\n---\n\n## R-001 · multi-award IDIQ pools emit one row per company\nWhen a single paragraph lists several companies, each followed by its own contract\nnumber in parentheses, and then a **single shared dollar figure** (\"will compete for\neach order of the $160,000,000 ... contract\", \"were awarded a combined $145,000,000\n... multiple award contract\"), emit **one row per company**, not one row for the\nparagraph:\n\n- `action_type` = `multi_award_pool`, `is_multi_award` = true on every row\n- `contract_number` = that company's own number, never a sibling's\n- `amount_usd` = the **shared ceiling**, repeated on every row. It is not divided by\n  the number of awardees and it is not a per-company amount. Downstream code knows to\n  treat it as shared via `is_multi_award`.\n- everything else (work description, completion date, contracting activity, bid\n  counts) is shared and is copied onto every row\n- the trailing `*` belongs to the company it is printed next to, so `small_business`\n  can differ row to row within the same pool\n\n- learned_from: announcement 4586879 (2026-08-31), the seven-company $160M USACE\n  Louisville design-bid-build pool (W912QR-26-D-A044 .. A050), and the ten-company\n  $145M NAVFAC petroleum/oil/lubricants pool (N39430-26-D-2011 .. 2020)\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.95\n\n## R-002 · a modification is not a new award\n\"was awarded a $180,000,000 modification (P00002) to contract W9124C-25-D-A003\"\nis one action against an existing vehicle:\n\n- `action_type` = `modification`\n- `modification_number` = `P00002` — the token in parentheses right after the word\n  *modification*. It is not always a P-number: `001 CB` is also a modification number.\n- `base_contract_number` = `W9124C-25-D-A003`, the contract being modified\n- `contract_number` = the same base contract number when no separate new number is\n  printed (the action lives on that contract)\n- `amount_usd` = **the amount of this action** ($180,000,000), never the cumulative\n- `cumulative_face_value_usd` = the stated total after the action ($280,000,000),\n  from \"a total cumulative face value of\", \"brings the total cumulative face value of\n  the contract to\", or \"The total cumulative face value is\"\n\n- learned_from: announcement 4586879 (2026-08-31), South Carolina Commission for the\n  Blind, $180M P00002 on W9124C-25-D-A003, cumulative $280M\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.95\n\n## R-003 · a modification that exercises an option is an option_exercise\nWhen the prose says the modification **exercises an option** (\"The modification\nexercises an option to provide continued program management\"), prefer\n`action_type` = `option_exercise` over `modification`. Still fill\n`modification_number` and `base_contract_number` — an option exercise is a\nmodification in form, and the distinction is the one an investor cares about\n(planned continuation vs. new money).\n\n- learned_from: announcement 4586879 (2026-08-31), KBR Wyle Services LLC,\n  $25,162,568 modification (P00003) to N0042125C1001 exercising an option\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.85\n\n## R-004 · the asterisk is the small-business marker\nA trailing `*` on the contractor name — printed after the name or after the comma\nthat follows it, e.g. `Action Manufacturing Co.,*` or `AAECON General Contracting\nLLC,*` — means `small_business` = true. Keep the asterisk in `contractor_raw`; it is\npart of the name \"exactly as printed\". The `*Small business` legend on the last line\nof the document is a footnote, **not an award** — never emit a row for it. No\nasterisk means `small_business` = false, not null.\n\n- learned_from: announcement 4586879 (2026-08-31), 14 of its contractor\n  names asterisked (15 asterisks in the body, one of which is the trailing\n  `*Small business` legend, not a marker)\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.97\n\n## R-005 · service branch is inherited from the ALL-CAPS header above\nAwards appear under ALL-CAPS section headers on their own line. Every award inherits\nthe nearest header **above** it, until the next header. Map the header to the enum by\nexact match; anything with no exact match becomes `OTHER`, and the literal header text\ngoes in `extraction_notes`.\n\nHeaders observed across the 50-document corpus, with their mapping:\n\n| printed header | `service_branch` |\n|---|---|\n| `ARMY` | `ARMY` |\n| `NAVY` | `NAVY` |\n| `AIR FORCE` | `AIR FORCE` |\n| `DEFENSE LOGISTICS AGENCY` | `DEFENSE LOGISTICS AGENCY` |\n| `MISSILE DEFENSE AGENCY` | `MISSILE DEFENSE AGENCY` |\n| `SPACE FORCE`, `MARINE CORPS` | same, when they appear |\n| `U.S. SPECIAL OPERATIONS COMMAND` | `OTHER` |\n| `U.S. TRANSPORTATION COMMAND` | `OTHER` |\n| `DEFENSE ADVANCED RESEARCH PROJECTS AGENCY` | `OTHER` |\n| `DEFENSE HEALTH AGENCY` | `OTHER` |\n| `DEFENSE COUNTERINTELLIGENCE AND SECURITY AGENCY` | `OTHER` |\n| `WASHINGTON HEADQUARTERS SERVICES` | `OTHER` |\n\n`DEFENSE` is reserved for a header that is literally `DEFENSE` (department-wide /\nOffice of the Secretary of Defense). Do **not** route DARPA or the Defense Health\nAgency to `DEFENSE` merely because the word appears in the header.\n\n- learned_from: header census over all 50 cached announcements (`raw/articles/*.html`)\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.9\n\n## R-006 · a task order against an existing IDIQ is a new_award with a parent\n\"is being awarded a $9,747,240 task order (H9240826FE010), under an indefinite\ndelivery-indefinite quantity contract ... The contract (H9240824D4343)\" has no\ndedicated `action_type`. Record it as `new_award`, with `contract_number` = the task\norder number, `base_contract_number` = the parent IDIQ, and `extraction_notes` saying\nit is a task order under that parent. Cap `extraction_confidence` around 0.8 — the\naction type is a judgement call the schema cannot express exactly.\n\n- learned_from: announcement 4586879 (2026-08-31), Raytheon Co. Silent Knight radar\n  task order H9240826FE010 under H9240824D4343\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.75\n\n## R-007 · bid counts: only record what is stated\n\"One bid was solicited with one received\" -> `bids_solicited` = 1, `bids_received` = 1.\n\"Bids were solicited via the internet with 19 received\" -> `bids_solicited` = null\n(the count is not stated), `bids_received` = 19.\n\"competitively procured via the SAM.gov website, with 14 offers received\" ->\n`bids_received` = 14, `bids_solicited` = null. Never infer a solicited count from a\nreceived count, and never write 0 for \"not stated\".\n\n- learned_from: announcement 4586879 (2026-08-31), all three phrasings present\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.92\n\n## R-008 · the amount is the amount of THIS action\nWhen a paragraph carries more than one dollar figure, `amount_usd` is the value of the\naction being announced, in this order of preference:\n1. \"The amount of this action is $X\" -> X\n2. the figure in the award verb phrase (\"was awarded a $X ... contract\") -> X\n3. for a multi-award pool, the shared ceiling (R-001)\n\nObligation figures (\"Fiscal 2026 funds in the amount of $X were obligated at the time\nof award\"), option/maximum values (\"The maximum dollar value, including the base price\nand 13 options, is $Y\") and cumulative face values are **not** `amount_usd`. The\ncumulative one goes to `cumulative_face_value_usd`; the others are not in the schema\nand, if a reviewer needs them, belong in `extraction_notes`.\n\n- learned_from: announcement 4586879 (2026-08-31), Environmental Chemical Corp.\n  ($128,363,354 award vs. $174,443,268 maximum with 13 options); Rockwell Collins\n  ($38,916,896 this action vs. $55,146,864 cumulative)\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.93\n\n## R-009 · a trailing \"(Awarded Aug. 28, 2026)\" does not change announced_date\nSome entries end with a parenthetical award date earlier than the announcement date.\n`announced_date` is deterministic (the date of the document) and is filled by code,\nnot by you. Do not try to correct it; if the discrepancy matters, mention it in\n`extraction_notes`.\n\n- learned_from: announcement 4586879 (2026-08-31), several entries marked\n  \"(Awarded Aug. 28, 2026)\"\n- added: 2026-09-01T21:14Z · by: extract@haiku-4-5 · confidence: 0.9\n\n# Announcement\n\nTitle: Contracts for Aug. 18, 2026\nAnnouncement date: 2026-08-18\n\n----- BEGIN ANNOUNCEMENT -----\nNAVY\nADRS LLC, Honolulu, Hawaii, is awarded a $249,000,000 firm-fixed-price, indefinite-delivery/indefinite-quantity contract for architect-engineer (A-E) services. This contract provides multi-discipline A-E services for architectural projects at various locations under the cognizance of Naval Facilities Engineering Command (NAVFAC), Pacific. Work will be performed at various locations within the NAVFAC Pacific area of responsibility including but not limited to Guam/Marianas (50%), Hawaii (10%), Australia (10%), and other locations (30%). The term of the contract is not to exceed 60 months with an expected completion date of August 2031, or until all task orders have been completed. Fiscal 2026 planning and design (Navy) funds in the amount of $25,000 are obligated for the minimum guarantee of this award and will not expire at the end of the current fiscal year. Future task orders will be primarily funded by military construction and operation and maintenance funds. This contract was competitively procured via the sam.gov website with one offer received. NAVFAC Pacific, Joint Base Pearl Harbor-Hickam, Hawaii, is the contracting activity (N62742-26-D-1213).\nBAE Systems Land & Armaments L.P, Maple Grove, Minnesota, is awarded a $169,216,659 firm-fixed-price modification to a previously awarded contract (N00024-24-C-5324) to exercise options for MK 41 Vertical Launching System canister and ancillary equipment production. This contract combines purchases for the U.S. (53%); and the governments of Australia (23%), Japan (13%), and the Netherlands (11%), under the Foreign Military Sales (FMS) program. Work will be performed in Aberdeen, South Dakota (90%); and Minneapolis, Minnesota (10%), and is expected to be completed by April 2031. Fiscal 2025 weapons procurement (Navy) funds in the amount of $43,003,506 (25%); FMS (Australia) funds in the amount of $38,206,496 (23%); FMS (Japan) funds in the amount of $21,191,242 (13%); fiscal 2026 defense-wide procurement funds in the amount of $20,531,146 (12%); FMS (Netherlands) funds in the amount of $18,687,960 (11%); fiscal 2025 defense-wide procurement funds in the amount of $17,442,096 (10%); fiscal 2026 weapons procurement (Navy) funds in the amount of $4,963,113 (3%); fiscal 2024 defense-wide procurement funds in the amount of $4,152,880 (2%); and fiscal 2026 missile procurement (Army) funds in the amount of $1,038,220 (1%), will be obligated at time of award, of which $4,152,880 will expire at the end of the current fiscal year. Naval Sea Systems Command, Washington, D.C., is the contracting activity.\nLockheed Martin Corp., Lockheed Martin Aeronautics Co., Fort Worth, Texas, is awarded a $29,600,000 firm-fixed-price order (N0001926F0236) against a previously issued basic ordering agreement (N0001924G0010). This order procures F-35 pilot flight equipment in support of Lot 18-19 aircraft deliveries and operational aircraft for the Air Force, Marine Corps, Navy, Foreign Military Sales (FMS) customers, and non-U.S. Department of War participants. Work will be performed in London, United Kingdom (96.15%); Greenville, Texas (3.81%); and Grand Rapids, Michigan (0.04%), and is expected to be completed in July 2029. Fiscal 2024 aircraft procurement (Air Force) funds in the amount of $11,198,507; fiscal 2024 aircraft procurement (Navy) funds in the amount of $9,065,485; FMS customer funds in the amount of $4,041,027; and non-U.S. Department of War participant funds in the amount of $5,294,981, will be obligated at the time of award. This contract was not competed. Naval Air Systems Command, Patuxent River, Maryland, is the contracting activity.\nGeneral Dynamics Mission Systems, Manassas, Virginia, is awarded a $15,631,811 cost-plus-incentive fee, cost-plus-fixed fee, and cost-only modification to a previously awarded contract (N00024-25-C-6260) to exercise options for shipset production, engineering, and installation support to perform software and hardware systems development, production, and platform installations. Work will be performed in Manassas, Virginia (30%); Groton, Connecticut (25%); Las Vegas, Nevada (25%); Port Orchard, Washington (10%); Chesapeake, Virginia (4%); Pearl Harbor, Hawaii (2%); San Diego, California (2%); and Kings Bay, Georgia (2%), and is expected to be completed by August 2027. Fiscal 2026 research, development, test and evaluation (Navy) funds in the amount of $2,717,669 (98%); and fiscal 2020 shipbuilding and conversion (Navy) funds in the amount of $69,909 (2%), will be obligated at time of award and will not expire at the end of the current fiscal year. Naval Sea Systems Command, Washington, D.C., is the contracting activity.\nOverland AI Inc.,* Seattle, Washington, is awarded a $14,305,444 firm-fixed-price contract for the development, integration and testing of a modular, formation-based mission autonomy capability on a heavy commercial vehicle platform. This contract provides for the integration of a mature autonomy stack onto six commercially available heavy-duty trucks to enable robust off-road autonomous driving in support of combat engineer operations. The effort also includes the design, implementation and integration of modular mission payloads, including the M58 Mine Clearing Line Charge, a commercial-off-the-shelf mine roller, lane marking system and counter-unmanned aircraft system. This contract is a Small Business Innovation Research Phase II effort under topic A244-003, \"Autonomous Breaching Capability.\" Work will be performed in Seattle, Washington, and is expected to be completed in October 2027. Fiscal 2025 research, development, test and evaluation (Defense Wide) funds in the amount of $13,975,740; and fiscal 2026 research, development, test and evaluation (Army) funds in the amount of $329,705, will be obligated at the time of award. This contract was not competitively procured. Naval Air Warfare Center Aircraft Division, Lakehurst, New Jersey, is the contracting activity (N6833526C1060).\nThe University of Connecticut (UConn), Storrs, Connecticut, is awarded a $13,617,790 cost-reimbursement contract for applied research to advance undersea vehicle technologies. UConn and the University of Rhode Island (URI) are partners at the National Institute for Undersea Vehicle Technology (NIUVT). Together, via the NIUVT partnership, the universities have over eight years of past performance conducting and delivering fundamental and applied research for the benefit of the Navy and its shipbuilders in Southern New England. URI will work with UConn to address some challenges in the engineering of acoustics, sensors and signal processing, advanced materials and structures, human factors, propulsion enabling technology, systems engineering, and underwater energy systems. Work will be performed in Storrs, Connecticut (50%); and Kingston, Rhode Island (50%), and is expected to be completed in August 2031. The total cumulative value of this contract, including a 60-month base period with no options, is $13,617,790. Fiscal 2025 research, development, test and evaluation (Navy) funds in the amount of $13,617,790 are obligated at the time of award and will expire at the end of the current fiscal year. This contract was competitively procured under long range broad agency announcement (BAA) (N0001425SB001) entitled \"Long Range Broad Agency Announcement for Navy and Marine Corps Science and Technology.\" Since proposals will be received throughout the year under the Long-Range BAA, the number of proposals received in response to the solicitation is unknown. The Office of Naval Research, Arlington, Virginia, is the contracting activity (N0001426C2217).\nNikira Labs, Inc.,* Mountain View, California, was awarded a $12,924,874 firm fixed price modification to a previously awarded contract (N00024-25-C-4303) for continued development, production, and installation for the spectroscopic total air monitor on U.S. Navy submarines. Work will be performed in Mountain View, California and is expected to be completed by April 2030. Fiscal 2026 other procurement (Navy) in the amount of $12,924,874 will be obligated at the time of award and will not expire at the end of the current fiscal year. Naval Sea Systems Command, Washington, D.C., is the contracting activity.\nARMY\nFederal Contracting Inc., Colorado Springs, Colorado, was awarded a firm-fixed-price contract for the design-bid-build construction of a ground-based strategic deterrent consolidated maintenance facility. The amount of this action is $143,178,782, with a total cumulative face value of $148,264,645. Bids were solicited via the internet with four received. Work will be performed in Cheyenne, Wyoming, with an estimated completion date of Dec. 31, 2029. Fiscal 2025 military construction, defense-wide funds in the amount of $143,178,782 were obligated at the time of the award. U.S. Army Corps of Engineers, Omaha, Nebraska, is the contracting activity (W9128F-26-C-A039).\nDEFENSE LOGISTICS AGENCY\nStryker Sales, Portage, Michigan, has been awarded a maximum $100,000,000 modification (P00020) exercising the five-year option period of a five-year base contract (SPE2D1-22-D-0001) with one five-year option period for patient monitoring and capital equipment. This is a fixed-price with economic-price-adjustment, indefinite-delivery/indefinite-quantity contract. The ordering period end date is Sept. 30, 2031. Using customers are Army, Navy, Air Force, Marine Corps and federal civilian agencies. Type of appropriation is fiscal 2026 through 2031 defense working capital funds. The contracting activity is Defense Logistics Agency Troop Support, Philadelphia, Pennsylvania.\nWASHINGTON HEADQUARTERS SERVICES\nQCM Inc., Falls Church, Virginia, has been awarded an indefinite-delivery/indefinity-quantity contract (HQ003426DE017) with a value of $32,562,887. The purpose of this contract is to provide preventative maintenance, predictive maintenance, and corrective maintenance at the Pentagon heating and refrigeration plant. Work will be performed at the Pentagon, Arlington, Virginia. The estimated completion date is Aug. 30, 2031. The total amount of the contract if all options are exercised is $74,258,567. No funds are being obligated at the time of the award. Washington Headquarters Services, Arlington, Virginia, is the contracting activity.\n*Small business\n----- END ANNOUNCEMENT -----",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "awards": {
+          "type": "array",
+          "description": "Every award in this announcement, in order. A multi-award pool contributes one entry per company.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "service_branch": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "ARMY",
+                      "NAVY",
+                      "AIR FORCE",
+                      "DEFENSE LOGISTICS AGENCY",
+                      "SPACE FORCE",
+                      "MARINE CORPS",
+                      "DEFENSE",
+                      "MISSILE DEFENSE AGENCY",
+                      "OTHER"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Service section this award appeared under, from the ALL-CAPS header"
+              },
+              "contractor_raw": {
+                "type": "string",
+                "description": "Contractor name exactly as printed, including Inc./LLC/Corp and any trailing asterisk"
+              },
+              "contractor_city": {
+                "type": "string",
+                "description": "City given for the contractor"
+              },
+              "contractor_state": {
+                "type": "string",
+                "description": "State or territory given for the contractor"
+              },
+              "amount_usd": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Dollar value of THIS action in whole dollars. For a multi-award pool this is the shared ceiling"
+              },
+              "action_type": {
+                "type": "string",
+                "enum": [
+                  "new_award",
+                  "modification",
+                  "option_exercise",
+                  "multi_award_pool"
+                ],
+                "description": "new_award | modification | option_exercise | multi_award_pool"
+              },
+              "contract_number": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Contract number for this contractor, e.g. W15QKN-26-D-A084. Join key into USAspending/FPDS"
+              },
+              "base_contract_number": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "For a modification, the underlying contract being modified"
+              },
+              "modification_number": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Modification id such as P00002, when present"
+              },
+              "cumulative_face_value_usd": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Total cumulative face value after this action, when the text states one"
+              },
+              "pricing_type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Pricing arrangement, e.g. firm-fixed-price, cost-plus-fixed-fee"
+              },
+              "is_idiq": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "True when described as indefinite-delivery/indefinite-quantity"
+              },
+              "is_multi_award": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "True when several companies will compete for orders under one shared vehicle"
+              },
+              "work_description": {
+                "type": "string",
+                "description": "What the contract is for, condensed to one sentence"
+              },
+              "place_of_performance": {
+                "type": "string",
+                "description": "Where work is performed, or a note that locations are determined per order"
+              },
+              "completion_date": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Estimated completion date as printed (free text)"
+              },
+              "contracting_activity": {
+                "type": "string",
+                "description": "The contracting activity and its location"
+              },
+              "bids_solicited": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Number of bids solicited, when stated"
+              },
+              "bids_received": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "Number of bids received, when stated"
+              },
+              "small_business": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "True when the entry carries the asterisk marking a small-business award"
+              },
+              "extraction_confidence": {
+                "type": "number",
+                "description": "0.0-1.0. Be honest: below 0.7 routes this row to human review"
+              },
+              "extraction_notes": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Anything ambiguous a reviewer should know. Empty when the entry was unambiguous"
+              }
+            },
+            "required": [
+              "service_branch",
+              "contractor_raw",
+              "contractor_city",
+              "contractor_state",
+              "amount_usd",
+              "action_type",
+              "contract_number",
+              "base_contract_number",
+              "modification_number",
+              "cumulative_face_value_usd",
+              "pricing_type",
+              "is_idiq",
+              "is_multi_award",
+              "work_description",
+              "place_of_performance",
+              "completion_date",
+              "contracting_activity",
+              "bids_solicited",
+              "bids_received",
+              "small_business",
+              "extraction_confidence",
+              "extraction_notes"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "document_notes": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Anything about the document as a whole a reviewer should know."
+        }
+      },
+      "required": [
+        "awards",
+        "document_notes"
+      ],
+      "additionalProperties": false
+    },
+    "max_tokens": 32000
+  },
+  "usage": {
+    "input_tokens": 8948,
+    "output_tokens": 2652
+  },
+  "output": {
+    "awards": [
+      {
+        "service_branch": "NAVY",
+        "contractor_raw": "ADRS LLC",
+        "contractor_city": "Honolulu",
+        "contractor_state": "Hawaii",
+        "amount_usd": 249000000,
+        "action_type": "new_award",
+        "contract_number": "N62742-26-D-1213",
+        "base_contract_number": null,
+        "modification_number": null,
+        "cumulative_face_value_usd": null,
+        "pricing_type": "firm-fixed-price, indefinite-delivery/indefinite-quantity",
+        "is_idiq": true,
+        "is_multi_award": false,
+        "work_description": "Multi-discipline architect-engineer services for architectural projects at various locations under Naval Facilities Engineering Command Pacific.",
+        "place_of_performance": "Various locations within NAVFAC Pacific area of responsibility including Guam/Marianas (50%), Hawaii (10%), Australia (10%), and other locations (30%)",
+        "completion_date": "August 2031",
+        "contracting_activity": "NAVFAC Pacific, Joint Base Pearl Harbor-Hickam, Hawaii",
+        "bids_solicited": null,
+        "bids_received": 1,
+        "small_business": false,
+        "extraction_confidence": 0.95,
+        "extraction_notes": null
+      },
+      {
+        "service_branch": "NAVY",
+        "contractor_raw": "BAE Systems Land & Armaments L.P",
+        "contractor_city": "Maple Grove",
+        "contractor_state": "Minnesota",
+        "amount_usd": 169216659,
+        "action_type": "option_exercise",
+        "contract_number": "N00024-24-C-5324",
+        "base_contract_number": "N00024-24-C-5324",
+        "modification_number": null,
+        "cumulative_face_value_usd": null,
+        "pricing_type": "firm-fixed-price",
+        "is_idiq": false,
+        "is_multi_award": false,
+        "work_description": "MK 41 Vertical Launching System canister and ancillary equipment production for U.S., Australia, Japan, and Netherlands under Foreign Military Sales program.",
+        "place_of_performance": "Aberdeen, South Dakota (90%); Minneapolis, Minnesota (10%)",
+        "completion_date": "April 2031",
+        "contracting_activity": "Naval Sea Systems Command, Washington, D.C.",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": false,
+        "extraction_confidence": 0.9,
+        "extraction_notes": "Exercise of options to previously awarded contract"
+      },
+      {
+        "service_branch": "NAVY",
+        "contractor_raw": "Lockheed Martin Corp., Lockheed Martin Aeronautics Co.",
+        "contractor_city": "Fort Worth",
+        "contractor_state": "Texas",
+        "amount_usd": 29600000,
+        "action_type": "new_award",
+        "contract_number": "N0001926F0236",
+        "base_contract_number": "N0001924G0010",
+        "modification_number": null,
+        "cumulative_face_value_usd": null,
+        "pricing_type": "firm-fixed-price",
+        "is_idiq": false,
+        "is_multi_award": false,
+        "work_description": "F-35 pilot flight equipment in support of Lot 18-19 aircraft deliveries for Air Force, Marine Corps, Navy, Foreign Military Sales customers, and non-U.S. Department of War participants.",
+        "place_of_performance": "London, United Kingdom (96.15%); Greenville, Texas (3.81%); Grand Rapids, Michigan (0.04%)",
+        "completion_date": "July 2029",
+        "contracting_activity": "Naval Air Systems Command, Patuxent River, Maryland",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": false,
+        "extraction_confidence": 0.8,
+        "extraction_notes": "Task order against previously issued basic ordering agreement N0001924G0010"
+      },
+      {
+        "service_branch": "NAVY",
+        "contractor_raw": "General Dynamics Mission Systems",
+        "contractor_city": "Manassas",
+        "contractor_state": "Virginia",
+        "amount_usd": 15631811,
+        "action_type": "option_exercise",
+        "contract_number": "N00024-25-C-6260",
+        "base_contract_number": "N00024-25-C-6260",
+        "modification_number": null,
+        "cumulative_face_value_usd": null,
+        "pricing_type": "cost-plus-incentive fee, cost-plus-fixed fee, cost-only",
+        "is_idiq": false,
+        "is_multi_award": false,
+        "work_description": "Shipset production, engineering, and installation support for software and hardware systems development, production, and platform installations.",
+        "place_of_performance": "Manassas, Virginia (30%); Groton, Connecticut (25%); Las Vegas, Nevada (25%); Port Orchard, Washington (10%); Chesapeake, Virginia (4%); Pearl Harbor, Hawaii (2%); San Diego, California (2%); Kings Bay, Georgia (2%)",
+        "completion_date": "August 2027",
+        "contracting_activity": "Naval Sea Systems Command, Washington, D.C.",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": false,
+        "extraction_confidence": 0.9,
+        "extraction_notes": "Exercise of options to previously awarded contract"
+      },
+      {
+        "service_branch": "NAVY",
+        "contractor_raw": "Overland AI Inc.,*",
+        "contractor_city": "Seattle",
+        "contractor_state": "Washington",
+        "amount_usd": 14305444,
+        "action_type": "new_award",
+        "contract_number": "N6833526C1060",
+        "base_contract_number": null,
+        "modification_number": null,
+        "cumulative_face_value_usd": null,
+        "pricing_type": "firm-fixed-price",
+        "is_idiq": false,
+        "is_multi_award": false,
+        "work_description": "Development, integration and testing of modular, formation-based mission autonomy capability on heavy commercial vehicle platform for autonomous breaching in combat engineer operations.",
+        "place_of_performance": "Seattle, Washington",
+        "completion_date": "October 2027",
+        "contracting_activity": "Naval Air Warfare Center Aircraft Division, Lakehurst, New Jersey",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": true,
+        "extraction_confidence": 0.95,
+        "extraction_notes": null
+      },
+      {
+        "service_branch": "NAVY",
+        "contractor_raw": "The University of Connecticut (UConn)",
+        "contractor_city": "Storrs",
+        "contractor_state": "Connecticut",
+        "amount_usd": 13617790,
+        "action_type": "new_award",
+        "contract_number": "N0001426C2217",
+        "base_contract_number": null,
+        "modification_number": null,
+        "cumulative_face_value_usd": 13617790,
+        "pricing_type": "cost-reimbursement",
+        "is_idiq": false,
+        "is_multi_award": false,
+        "work_description": "Applied research to advance undersea vehicle technologies addressing acoustics, sensors, signal processing, materials, structures, human factors, propulsion, systems engineering, and underwater energy systems.",
+        "place_of_performance": "Storrs, Connecticut (50%); Kingston, Rhode Island (50%)",
+        "completion_date": "August 2031",
+        "contracting_activity": "Office of Naval Research, Arlington, Virginia",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": false,
+        "extraction_confidence": 0.9,
+        "extraction_notes": "Multi-university partnership with University of Rhode Island; 60-month base period with no options"
+      },
+      {
+        "service_branch": "NAVY",
+        "contractor_raw": "Nikira Labs, Inc.,*",
+        "contractor_city": "Mountain View",
+        "contractor_state": "California",
+        "amount_usd": 12924874,
+        "action_type": "modification",
+        "contract_number": "N00024-25-C-4303",
+        "base_contract_number": "N00024-25-C-4303",
+        "modification_number": null,
+        "cumulative_face_value_usd": null,
+        "pricing_type": "firm-fixed-price",
+        "is_idiq": false,
+        "is_multi_award": false,
+        "work_description": "Continued development, production, and installation of spectroscopic total air monitor on U.S. Navy submarines.",
+        "place_of_performance": "Mountain View, California",
+        "completion_date": "April 2030",
+        "contracting_activity": "Naval Sea Systems Command, Washington, D.C.",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": true,
+        "extraction_confidence": 0.95,
+        "extraction_notes": null
+      },
+      {
+        "service_branch": "ARMY",
+        "contractor_raw": "Federal Contracting Inc.",
+        "contractor_city": "Colorado Springs",
+        "contractor_state": "Colorado",
+        "amount_usd": 143178782,
+        "action_type": "new_award",
+        "contract_number": "W9128F-26-C-A039",
+        "base_contract_number": null,
+        "modification_number": null,
+        "cumulative_face_value_usd": 148264645,
+        "pricing_type": "firm-fixed-price",
+        "is_idiq": false,
+        "is_multi_award": false,
+        "work_description": "Design-bid-build construction of ground-based strategic deterrent consolidated maintenance facility.",
+        "place_of_performance": "Cheyenne, Wyoming",
+        "completion_date": "Dec. 31, 2029",
+        "contracting_activity": "U.S. Army Corps of Engineers, Omaha, Nebraska",
+        "bids_solicited": null,
+        "bids_received": 4,
+        "small_business": false,
+        "extraction_confidence": 0.95,
+        "extraction_notes": null
+      },
+      {
+        "service_branch": "DEFENSE LOGISTICS AGENCY",
+        "contractor_raw": "Stryker Sales",
+        "contractor_city": "Portage",
+        "contractor_state": "Michigan",
+        "amount_usd": 100000000,
+        "action_type": "option_exercise",
+        "contract_number": "SPE2D1-22-D-0001",
+        "base_contract_number": "SPE2D1-22-D-0001",
+        "modification_number": "P00020",
+        "cumulative_face_value_usd": null,
+        "pricing_type": "fixed-price with economic-price-adjustment, indefinite-delivery/indefinite-quantity",
+        "is_idiq": true,
+        "is_multi_award": false,
+        "work_description": "Patient monitoring and capital equipment provision to Army, Navy, Air Force, Marine Corps and federal civilian agencies.",
+        "place_of_performance": "",
+        "completion_date": "Sept. 30, 2031",
+        "contracting_activity": "Defense Logistics Agency Troop Support, Philadelphia, Pennsylvania",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": false,
+        "extraction_confidence": 0.85,
+        "extraction_notes": "Maximum value is $100,000,000; exercising five-year option period"
+      },
+      {
+        "service_branch": "OTHER",
+        "contractor_raw": "QCM Inc.",
+        "contractor_city": "Falls Church",
+        "contractor_state": "Virginia",
+        "amount_usd": 32562887,
+        "action_type": "new_award",
+        "contract_number": "HQ003426DE017",
+        "base_contract_number": null,
+        "modification_number": null,
+        "cumulative_face_value_usd": null,
+        "pricing_type": null,
+        "is_idiq": true,
+        "is_multi_award": false,
+        "work_description": "Preventative maintenance, predictive maintenance, and corrective maintenance at the Pentagon heating and refrigeration plant.",
+        "place_of_performance": "Pentagon, Arlington, Virginia",
+        "completion_date": "Aug. 30, 2031",
+        "contracting_activity": "Washington Headquarters Services, Arlington, Virginia",
+        "bids_solicited": null,
+        "bids_received": null,
+        "small_business": false,
+        "extraction_confidence": 0.75,
+        "extraction_notes": "Service branch is WASHINGTON HEADQUARTERS SERVICES; total value with all options exercised is $74,258,567; no funds obligated at time of award"
+      }
+    ],
+    "document_notes": "All extraction completed. One task order identified (Lockheed Martin) and extracted per R-006. One modification with option exercise identified (BAE Systems) and classified as option_exercise per R-003. Small business indicators (asterisks) applied per R-004. Bid counts extracted per R-007 where stated. Service branch headers mapped per R-005, with WASHINGTON HEADQUARTERS SERVICES mapped to OTHER."
+  }
+}
