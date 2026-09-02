@@ -743,37 +743,55 @@ _TIER_CSS = {
 }
 
 
+#: A cell that opens something, styled to say so. There is no href behind it -- the
+#: grid opens real links in a new browser tab -- so the affordance has to be painted on.
+_LINK_CSS = "color:#4c8dff;text-decoration:underline;font-weight:600"
+
+
 def show_table(df: pd.DataFrame, tier_col: str | None = None, height: int | None = None,
-               key: str | None = None, select: bool = False, column_config=None):
-    """One table renderer. Tints the tier column when there is one; never fails on it."""
+               key: str | None = None, select: bool = False, column_config=None,
+               link_cols: tuple[str, ...] = ()):
+    """One table renderer. Tints the tier column and marks clickable cells as clickable.
+
+    `link_cols` names columns that open something on click. They are painted to look
+    like links because they behave like links, but they are plain text: a real link
+    cell is an `<a href>` and the grid forces it into a new browser tab.
+    """
     kwargs = {"hide_index": True, "width": "stretch"}
     if height:
         kwargs["height"] = height
     if column_config:
         kwargs["column_config"] = column_config
     if select:
-        # The key carries a nonce that `selected_row` bumps after it reads a click.
-        # A selectable st.dataframe keeps its selection in session state forever, so a
-        # naive `if selection.rows:` re-fires the modal on EVERY later rerun -- click a
-        # row, dismiss it, change a filter, and it springs back. Re-mounting the table
-        # under a fresh key is what actually clears the selection, which also means the
-        # same row can be clicked a second time and still open.
         # Cell selection as well as row selection, so a click on the Ticker cell can
-        # open the company while a click anywhere else opens the contract. This is
-        # what replaced LinkColumn for navigation: a link cell is an <a href>, and the
-        # grid opens those in a NEW BROWSER TAB with no option to change the target.
-        # A modal is the right weight for "who is this company", not a second tab.
+        # open the company while a click anywhere else opens the contract.
+        #
+        # The key is STABLE. An earlier version put a nonce in it and re-mounted the
+        # table after every click, to clear the selection that st.dataframe otherwise
+        # keeps forever. That worked only if something reran between clicks -- and
+        # dismissing a dialog does not rerun. So the remount landed on the user's NEXT
+        # click and ate it: the table visibly rebuilt and no modal opened, every other
+        # time. `selected_hit` now dedupes on the selection's value instead, which
+        # needs no remount and loses no clicks.
         kwargs.update(on_select="rerun", selection_mode=["single-row", "single-cell"],
-                      key=f"{key}__{st.session_state.get(f'_sel_nonce_{key}', 0)}")
+                      key=key)
     elif key:
         kwargs["key"] = key
     data = df
-    if tier_col and tier_col in df.columns:
-        try:
-            data = df.style.map(
+    try:
+        styler = None
+        if tier_col and tier_col in df.columns:
+            styler = df.style.map(
                 lambda v: _TIER_CSS.get(str(v).strip().lower(), ""), subset=[tier_col])
-        except Exception:
-            data = df
+        live = [c for c in link_cols if c in df.columns]
+        if live:
+            styler = (styler if styler is not None else df.style).map(
+                lambda v: _LINK_CSS if str(v).strip() not in ("", DASH) else "",
+                subset=live)
+        if styler is not None:
+            data = styler
+    except Exception:
+        data = df
     try:
         return st.dataframe(data, **kwargs)
     except Exception:
@@ -807,10 +825,23 @@ def selected_hit(sel, key: str) -> tuple[int | None, str | None]:
             rows = []
         if rows:
             row = int(rows[0])
+
+    # Dedupe on the selection's VALUE, not by re-mounting the widget. st.dataframe
+    # keeps its selection forever, so a bare `if selection:` re-fires the modal on
+    # every later rerun. Remounting under a fresh key clears it but needs a rerun to
+    # happen first -- and dismissing a dialog does not rerun, so the remount landed on
+    # the next click and swallowed it. Comparing values costs nothing and loses no
+    # clicks: a different cell always opens, and an unchanged one never re-opens.
+    slot = f"_last_hit_{key}"
     if row is None:
+        # The grid came back with nothing selected, so whatever we last handled is
+        # finished. Forgetting it here is what lets the SAME cell be clicked again.
+        st.session_state.pop(slot, None)
         return None, None
-    slot = f"_sel_nonce_{key}"
-    st.session_state[slot] = st.session_state.get(slot, 0) + 1
+    token = f"{row}|{col}"
+    if st.session_state.get(slot) == token:
+        return None, None
+    st.session_state[slot] = token
     return row, col
 
 
@@ -1355,8 +1386,10 @@ def view_events(frames, df):
             "Contract to date": f["total_actioned_usd"].map(usd)
             if "total_actioned_usd" in f.columns else DASH,
         }), tier_col="Tier", height=520, key="change_events", select=True,
+            link_cols=("Ticker", "Contract"),
             column_config={
                 "Ticker": TICKER_COL,
+                "Contract": CONTRACT_COL,
                 "Score": st.column_config.NumberColumn("Score", format="%d"),
             })
 
@@ -1436,6 +1469,7 @@ def view_contracts(frames, df):
             "History": f["history_complete"].map(
                 lambda v: "complete" if v is True else "opens earlier"),
         }), height=520, key="contracts_table", select=True,
+            link_cols=("Ticker", "Contract"),
             column_config={
                 "Ticker": TICKER_COL,
                 "Events": st.column_config.NumberColumn("Events", format="%d"),
