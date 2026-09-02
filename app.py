@@ -54,6 +54,25 @@ try:
 except Exception:
     pass
 
+# Streamlit reserves a lot of vertical space above the first element and between
+# blocks. On a data-dense terminal that pushes the actual content below the fold,
+# so trim it. Cosmetic only -- no behaviour depends on this.
+try:
+    st.markdown(
+        """
+        <style>
+          .block-container {padding-top: 2.2rem; padding-bottom: 2rem;}
+          h1 {font-size: 1.45rem; margin: 0 0 .15rem 0;}
+          h2, h3 {margin-top: .4rem;}
+          [data-testid="stMetricValue"] {font-size: 1.25rem;}
+          [data-testid="stMetricLabel"] {font-size: .78rem; opacity: .75;}
+          hr {margin: .7rem 0;}
+        </style>
+        """,
+        unsafe_allow_html=True)
+except Exception:
+    pass
+
 try:
     import schemas  # the frozen contract -- read only, never edited from here
 except Exception as _exc:  # pragma: no cover -- a missing contract is a build error
@@ -696,6 +715,53 @@ def tier_text(v) -> str:
 # View 1 -- change feed
 # ---------------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------------
+# Modals -- a click on a ticker or an event opens the detail, instead of stacking
+# another panel onto an already dense page.
+# ---------------------------------------------------------------------------------
+
+@st.dialog("Awards", width="large")
+def ticker_dialog(frames, df, ticker: str) -> None:
+    """Every award for one ticker. Opened by clicking the ticker in any table."""
+    sub = df[df["ticker"] == ticker].sort_values("announced_date", ascending=False)
+
+    ent = frames.get("entities")
+    if ent is not None and not ent.empty:
+        row = ent[ent["ticker"] == ticker].head(1)
+        if not row.empty:
+            r = row.iloc[0]
+            name = txt(r["parent_company"])
+            st.markdown(f"**{name if name != DASH else ticker}** · `{ticker}` · "
+                        f"{txt(r['relationship'])}")
+            st.caption(txt(r["reasoning"]))
+
+    if sub.empty:
+        st.info(f"No awards for {ticker} in the current export.")
+        return
+
+    metric_row([
+        ("Obligated", usd(sub["amount_usd"].sum(min_count=1))),
+        ("Awards", f"{len(sub):,}"),
+        ("Largest", usd(sub["amount_usd"].max())),
+    ])
+    show_table(pd.DataFrame({
+        "Date": sub["announced_date"].map(iso_date),
+        "Tier": sub["tier"].map(tier_text),
+        "Contractor": sub["contractor_raw"].map(txt),
+        "Amount": sub["amount_usd"].map(usd),
+        "Action": sub["action_type"].map(lambda v: txt(v).replace("_", " ")),
+        "Branch": sub["service_branch"].map(txt),
+    }), tier_col="Tier", height=300, key=f"tk_{ticker}")
+
+
+@st.dialog("Provenance", width="large")
+def provenance_dialog(frames, r) -> None:
+    """The audit trail for ONE row: source document, digest, and the model call
+    behind every AI-derived field. Same panel as the Provenance view -- reached
+    here by clicking the event or award it belongs to."""
+    provenance_panel(frames, r)
+
+
 def _change_events(frames, df):
     """The actual change feed: rows of `changes`, enriched from `awards`.
 
@@ -713,8 +779,9 @@ def _change_events(frames, df):
     ev = ev.sort_values(["materiality_score", "detected_at"],
                         ascending=[False, False], na_position="last")
 
-    st.caption(f"{len(ev):,} change event(s) since the last refresh, most material first.")
-    show_table(pd.DataFrame({
+    st.caption(f"{len(ev):,} change event(s), most material first. "
+               "Select one for its provenance.")
+    sel = show_table(pd.DataFrame({
         "Detected": ev["detected_at"].map(iso_ts),
         "Change": ev["change_type"].map(lambda v: txt(v).replace("_", " ")),
         "Score": ev["materiality_score"],
@@ -723,7 +790,24 @@ def _change_events(frames, df):
         "Amount": ev["amount_usd"].map(usd),
         "Was": ev["prev_value"].map(txt),
         "Now": ev["new_value"].map(txt),
-    }), height=260, key="change_events")
+    }), height=240, key="change_events", select=True)
+
+    # A change event is an award UID plus what changed, so its provenance is the
+    # provenance of that award -- resolved through the enriched frame rather than
+    # re-derived here.
+    try:
+        picked = list(sel.selection.rows)
+    except Exception:
+        picked = []
+    if picked:
+        uid = ev.iloc[picked[0]]["award_uid"]
+        match = df[df["award_uid"] == uid]
+        if match.empty:
+            st.warning(f"No award row for `{uid}` in this export, so there is no "
+                       "provenance to show. The change event references an award "
+                       "that has not been extracted yet.")
+        else:
+            provenance_dialog(frames, match.iloc[0])
     st.divider()
     return True
 
@@ -745,14 +829,14 @@ def view_feed(frames, df):
                               "investor materiality.")
         return
 
-    c1, c2, c3, c4 = st.columns([1.5, 1.1, 1.5, 1])
-    tiers = c1.multiselect("Tier", TIER_ORDER, default=TIER_ORDER)
     tick_opts = ["all"] + sorted({str(t) for t in df["ticker"].dropna().unique()})
-    ticker = c2.selectbox("Ticker", tick_opts)
-    branches = c3.multiselect("Branch",
-                              sorted({str(b) for b in df["service_branch"].dropna().unique()}))
-    days = c4.number_input("Lookback (days)", min_value=1, max_value=3650, value=90,
-                           step=7)
+    with st.popover("Filters", width="content"):
+        tiers = st.multiselect("Tier", TIER_ORDER, default=TIER_ORDER)
+        ticker = st.selectbox("Ticker", tick_opts)
+        branches = st.multiselect(
+            "Branch", sorted({str(b) for b in df["service_branch"].dropna().unique()}))
+        days = st.number_input("Lookback (days)", min_value=1, max_value=3650,
+                               value=90, step=7)
 
     f = df.copy()
     if len(tiers) < len(TIER_ORDER):
@@ -772,8 +856,6 @@ def view_feed(frames, df):
         ("Awards in view", f"{len(f):,}"),
         ("Alerts", f"{int((f['tier'] == 'alert').sum()):,}"),
         ("Obligated", usd(f["amount_usd"].sum(min_count=1))),
-        ("Tickers", f"{f['ticker'].nunique():,}"),
-        ("No ticker", f"{int(f['ticker'].isna().sum()):,}"),
     ])
 
     if f.empty:
@@ -789,20 +871,29 @@ def view_feed(frames, df):
         "Amount": f["amount_usd"].map(usd),
         "Action": f["action_type"].map(lambda v: txt(v).replace("_", " ")),
         "Branch": f["service_branch"].map(txt),
-        "Rationale": f["rationale"].map(txt),
     })
-    ev = show_table(view, tier_col="Tier", height=460, key="feed_table", select=True,
+    ev = show_table(view, tier_col="Tier", height=420, key="feed_table", select=True,
                     column_config={"Score": st.column_config.NumberColumn(
                         "Score", help="0-100 investor relevance", format="%d")})
 
-    st.caption("Select a row for its provenance: the source document, its digest, and "
-               "the model call behind every AI-derived field.")
+    st.caption("Select a row for its provenance, or click a ticker for its awards.")
     try:
         rows = list(ev.selection.rows)
     except Exception:
         rows = []
     if rows:
-        provenance_panel(frames, f.iloc[rows[0]])
+        provenance_dialog(frames, f.iloc[rows[0]])
+
+    # A dataframe cell cannot carry a click handler, so the tickers present in the
+    # current view get their own control strip.
+    present = [t for t in sorted({str(x) for x in f["ticker"].dropna().unique()})]
+    if present:
+        st.caption("Awards by ticker")
+        for i in range(0, len(present), 10):
+            row = present[i:i + 10]
+            for col, tk in zip(st.columns(10), row):
+                if col.button(tk, key=f"tkbtn_{tk}", width="stretch"):
+                    ticker_dialog(frames, df, tk)
 
 
 # ---------------------------------------------------------------------------------
@@ -1217,12 +1308,17 @@ def main() -> None:
     for t, msg in errors.items():
         st.sidebar.error(f"{t}: {msg}")
 
-    st.title("DoD Contract Terminal")
-    st.caption("Department of War daily contract awards above $7.5M — extracted "
-               "from prose, resolved to tickers, scored for investor materiality.")
+    head, badge = st.columns([5, 2])
+    head.markdown("### DoD Contract Terminal")
     if demo:
-        st.warning("SYNTHETIC DEMO DATA — fabricated rows shaped to the frozen "
-                   "contract, not fetched from war.gov. Nothing below is a real award.")
+        badge.warning("SYNTHETIC DEMO DATA — not real awards", icon=":material/science:")
+    with st.expander("What this is"):
+        st.caption("Department of War daily contract awards above $7.5M — extracted "
+                   "from prose, resolved to tickers, scored for investor materiality. "
+                   "A read-only view over exported Parquet: ranking is a sort, change "
+                   "detection is a set difference, totals are a groupby. No model call "
+                   "happens in this process, and every column name comes from "
+                   "src/schemas.py, the frozen contract.")
 
     df = enrich(frames)
 
@@ -1237,11 +1333,7 @@ def main() -> None:
     else:
         view_provenance(frames, df)
 
-    st.markdown("---")
-    st.caption("A read-only view over exported Parquet. Ranking is a sort, change "
-               "detection is a set difference, totals are a groupby — no model call "
-               "happens in this process. Column names come from src/schemas.py, the "
-               "frozen contract.")
+
 
 
 main()
