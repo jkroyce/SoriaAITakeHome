@@ -1,0 +1,2 @@
+award_uid,score,tier,rationale,drivers,scored_at,scorer_model,llm_cache_key,skills_version
+b814e6cf82b5fc80,28,routine,"A $712.5M ceiling IDIQ for fuze manufacturing under a small-business set-aside with no competition (1 bid) is an option, not booked revenue, and no listed company is the prime or a named read-through.","[""ceiling_not_revenue"", ""small_business_setaside"", ""sole_source"", ""sustainment""]",2026-09-02 15:30:44,claude-haiku-4-5,e576d344000809c6e10e1c25fc42602bb4bd99e6df45ec1e372b9114a26cfde3,sk-5d396ec5

@@ -42,10 +42,57 @@ def test_json_schema_contains_exactly_the_llm_fields():
                 assert f.name not in props, f"{f.name} is computed; it must not be in a prompt"
 
 
+def _is_union(spec: dict) -> bool:
+    return "anyOf" in spec or isinstance(spec.get("type"), list)
+
+
 def test_json_schema_is_strict_mode_shaped():
+    """Closed object, every property required.
+
+    Not merely stylistic: the API's structured-output compiler treats optional
+    properties as the expensive shape -- 19 of them returns "Schema is too
+    complex", because the decoder must accept every subset. Nullability is
+    carried by the type union instead, so the model must say "null" rather than
+    silently dropping a key.
+    """
     obj = schemas.object_schema(schemas.AWARD_FIELDS)
     assert obj["additionalProperties"] is False
     assert set(obj["required"]) == set(obj["properties"])
+
+
+def test_prompt_schema_stays_under_the_union_cap():
+    """The API rejects a structured-output schema with more than 16 union-typed
+    parameters ("limit: 16 parameters with unions"). The awards schema sits just
+    under it, so a newly-nullable field is exactly the change that would break
+    extraction -- and it would break it at request time, not here, without this.
+    """
+    unions = []
+
+    def walk(node, path="root"):
+        if isinstance(node, dict):
+            if _is_union(node):
+                unions.append(path)
+            for k, v in node.items():
+                walk(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{path}[{i}]")
+
+    walk(schemas.extraction_schema())
+    assert len(unions) <= 16, (
+        f"{len(unions)} union-typed params exceeds the API cap of 16: {unions}")
+
+
+def test_nullable_enums_avoid_the_union_type_form():
+    """A union `type` paired with `enum` is rejected outright -- "Enum value
+    'ARMY' does not match declared type '['string', 'null']'" -- so _enum emits
+    anyOf(enum, null) instead."""
+    for table, (fields, _pk) in schemas.TABLES.items():
+        for f in fields:
+            j = f.json
+            if "enum" in j:
+                assert not isinstance(j.get("type"), list), (
+                    f"{table}.{f.name} uses the rejected union+enum form")
 
 
 def test_every_field_is_documented():

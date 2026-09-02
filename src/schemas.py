@@ -55,8 +55,24 @@ def _bool(nullable: bool = True) -> dict:
 
 
 def _enum(values: list[str], nullable: bool = True) -> dict:
-    return {"type": ["string", "null"] if nullable else "string",
-            "enum": values + ([None] if nullable else [])}
+    """A closed set of strings, optionally nullable.
+
+    A nullable enum is expressed as anyOf(enum, null) rather than the more obvious
+    {"type": ["string", "null"], "enum": [...,  None]}. Both are valid JSON Schema,
+    but the Messages API's structured-output validator rejects a union `type`
+    paired with `enum`:
+
+        Invalid schema: Enum value 'ARMY' does not match declared type
+        '['string', 'null']'
+
+    Verified against the live API on 2026-09-02: the union form 400s, anyOf is
+    accepted, and plain nullable types without an enum are fine -- so this helper
+    is the only one that needs the alternate shape. The permitted values and the
+    nullability are unchanged, as is the DDL projection.
+    """
+    if not nullable:
+        return {"type": "string", "enum": list(values)}
+    return {"anyOf": [{"type": "string", "enum": list(values)}, {"type": "null"}]}
 
 
 # --------------------------------------------------------------------------------
@@ -78,8 +94,8 @@ AWARD_FIELDS: list[Field] = [
           "Service section this award appeared under, from the ALL-CAPS header"),
     Field("contractor_raw", "VARCHAR", _s(False),
           "Contractor name exactly as printed, including Inc./LLC/Corp and any trailing asterisk"),
-    Field("contractor_city", "VARCHAR", _s(), "City given for the contractor"),
-    Field("contractor_state", "VARCHAR", _s(), "State or territory given for the contractor"),
+    Field("contractor_city", "VARCHAR", _s(False), "City given for the contractor"),
+    Field("contractor_state", "VARCHAR", _s(False), "State or territory given for the contractor"),
     Field("amount_usd", "BIGINT", _int(),
           "Dollar value of THIS action in whole dollars. For a multi-award pool this is the shared ceiling"),
     Field("action_type", "VARCHAR", _enum(ACTION_TYPES, nullable=False),
@@ -97,11 +113,11 @@ AWARD_FIELDS: list[Field] = [
           "True when described as indefinite-delivery/indefinite-quantity"),
     Field("is_multi_award", "BOOLEAN", _bool(),
           "True when several companies will compete for orders under one shared vehicle"),
-    Field("work_description", "VARCHAR", _s(), "What the contract is for, condensed to one sentence"),
-    Field("place_of_performance", "VARCHAR", _s(),
+    Field("work_description", "VARCHAR", _s(False), "What the contract is for, condensed to one sentence"),
+    Field("place_of_performance", "VARCHAR", _s(False),
           "Where work is performed, or a note that locations are determined per order"),
     Field("completion_date", "VARCHAR", _s(), "Estimated completion date as printed (free text)"),
-    Field("contracting_activity", "VARCHAR", _s(), "The contracting activity and its location"),
+    Field("contracting_activity", "VARCHAR", _s(False), "The contracting activity and its location"),
     Field("bids_solicited", "INTEGER", _int(), "Number of bids solicited, when stated"),
     Field("bids_received", "INTEGER", _int(), "Number of bids received, when stated"),
     Field("small_business", "BOOLEAN", _bool(),
@@ -230,6 +246,16 @@ def object_schema(fields: list[Field]) -> dict:
     Strict-mode shaped: every property required, additionalProperties false.
     Nullability is expressed in the type union, not by omission, so the model must
     say "null" rather than silently dropping a key.
+
+    Both halves matter to the API's structured-output compiler, and each has a
+    budget (verified live 2026-09-02):
+
+      * optional properties are the expensive shape -- 19 of them returned
+        "Schema is too complex", because the decoder must accept any subset. So
+        every property stays required.
+      * union types are capped at 16. 22 award fields with 19 nullable exceeded
+        it, so the five fields a DoD announcement always states are declared
+        non-nullable, leaving 14 unions here plus document_notes.
     """
     props, required = {}, []
     for f in llm_fields(fields):

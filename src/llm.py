@@ -116,13 +116,19 @@ class CachedLLM:
                 f"Re-run with --live and ANTHROPIC_API_KEY set to populate the cache."
             )
 
-        resp = self._client_lazy().messages.create(
+        # Streaming, not messages.create(): the SDK refuses a non-streaming request
+        # whose max_tokens could run past the 10-minute HTTP timeout, and extraction
+        # asks for 32000. The response is identical either way -- get_final_message()
+        # returns the same Message object -- and the cache key is unaffected, because
+        # it hashes (model, system, prompt, schema, max_tokens) and not the transport.
+        with self._client_lazy().messages.stream(
             model=model,
             max_tokens=max_tokens,
             system=system,
             messages=[{"role": "user", "content": prompt}],
             output_config={"format": {"type": "json_schema", "schema": schema}},
-        )
+        ) as stream:
+            resp = stream.get_final_message()
         text = next(b.text for b in resp.content if b.type == "text")
         output = json.loads(text)
 

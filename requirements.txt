@@ -5,3 +5,4 @@ duckdb>=1.5.5
 pandas>=3.0.0
 pyarrow
 streamlit
+python-dotenv        # reads .env, as .env.example instructs

@@ -1,9 +1,26 @@
 {
   "schema_version": "1.0.0",
   "key": "normalized contractor name (see resolve_entity.normalize); raw_variants lists every printed spelling that maps here. entities.contractor_raw stays RAW -- this key is not that key.",
-  "updated_at": "2026-09-01T23:40:48+00:00",
-  "n_entities": 38,
+  "updated_at": "2026-09-02T15:30:40+00:00",
+  "n_entities": 39,
   "entities": {
+    "aaecon general contracting": {
+      "contractor_raw": "AAECON General Contracting LLC,*",
+      "normalized_name": "AAECON General Contracting",
+      "ticker": null,
+      "parent_company": null,
+      "relationship": "private",
+      "is_public": false,
+      "confidence": 0.92,
+      "reasoning": "Small-business awardee with no recognizable connection to any listed company; the $7.5M publication threshold is well within reach of independent engineering or construction firms, making private ownership the appropriate classification.",
+      "resolved_at": "2026-09-02T15:30:40+00:00",
+      "resolver_model": "claude-haiku-4-5",
+      "llm_cache_key": "0b4c90b0c0f6880f40b1628f5cc53a6e036cc8d4f1055d2f3cc3182a8238f75e",
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "AAECON General Contracting LLC,*"
+      ]
+    },
     "boeing": {
       "contractor_raw": "The Boeing Co.",
       "normalized_name": "The Boeing Company",

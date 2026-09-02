@@ -174,6 +174,10 @@ deterministic code after you answer. They are not in your schema. Do not invent 
 
 Return JSON matching the schema exactly: every property present on every award, using
 `null` for a value the text does not give. Never drop a key, never add one.
+Five fields cannot be null because a DoD announcement always states them:
+`contractor_city`, `contractor_state`, `work_description`,
+`place_of_performance`, `contracting_activity`. If one is genuinely absent,
+give an empty string "" -- never invent a value to fill it.
 """
 
 # Fields the model is allowed to fill, and the ones we fill ourselves.

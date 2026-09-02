@@ -63,6 +63,33 @@ def ca_bundle() -> str:
     return str(merged)
 
 
+def _load_dotenv() -> None:
+    """Read `.env` into os.environ before any value below is resolved.
+
+    `.env.example` tells the user to copy it to `.env`, so something has to read
+    it. python-dotenv if present; otherwise a minimal parser, because a missing
+    optional dependency should not silently turn a --live run into "key not set".
+    An already-exported variable always wins -- the shell beats the file.
+    """
+    path = ROOT / ".env"
+    if not path.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(path, override=False)
+        return
+    except ModuleNotFoundError:
+        pass
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+_load_dotenv()
+
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 BULK_MODEL = os.environ.get("BULK_MODEL", "claude-haiku-4-5")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-opus-5")
