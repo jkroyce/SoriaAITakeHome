@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+from typing import Any
 import os
 import pathlib
 from dataclasses import dataclass, field
@@ -44,7 +46,16 @@ class Usage:
     output_tokens: int = 0
     by_model: dict = field(default_factory=dict)
 
+    #: Guards the counters below. Extraction runs several documents concurrently,
+    #: and `self.calls += 1` is a read-modify-write -- without this, parallel calls
+    #: silently under-report spend, which is the one number that must not drift.
+    _lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
+
     def add(self, model: str, tin: int, tout: int) -> None:
+        with self._lock:
+            self._add(model, tin, tout)
+
+    def _add(self, model: str, tin: int, tout: int) -> None:
         self.calls += 1
         self.input_tokens += tin
         self.output_tokens += tout
@@ -107,7 +118,8 @@ class CachedLLM:
 
         if path.exists():
             rec = json.loads(path.read_text(encoding="utf-8"))
-            self.usage.cache_hits += 1
+            with self.usage._lock:
+                self.usage.cache_hits += 1
             return rec["output"]
 
         if not self.live:

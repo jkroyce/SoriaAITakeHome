@@ -93,3 +93,9 @@ _load_dotenv()
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 BULK_MODEL = os.environ.get("BULK_MODEL", "claude-haiku-4-5")
 JUDGE_MODEL = os.environ.get("JUDGE_MODEL", "claude-opus-5")
+
+#: How many documents to extract at once. Extraction is I/O-bound -- each call
+#: spends most of its wall clock waiting on the API -- so threads help and the GIL
+#: does not bite. Kept modest by default: the ceiling here is the account's rate
+#: limit, not the CPU, and a 429 storm costs more time than the parallelism saves.
+EXTRACT_CONCURRENCY = max(1, int(os.environ.get("EXTRACT_CONCURRENCY", "4")))

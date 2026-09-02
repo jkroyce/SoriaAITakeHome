@@ -53,6 +53,7 @@ import inspect
 import json
 import math
 import os
+import concurrent.futures as cf
 import pathlib
 import subprocess
 import sys
@@ -273,10 +274,11 @@ class ExtractAgent:
 
     name = "extract"
 
-    #: One document per dispatch. extract_document() is already one model call per
-    #: announcement, so this costs nothing and lets each document land in the DB and
-    #: the exports as soon as it is parsed.
-    chunk_size = 1
+    #: One parallel wave per dispatch: the wave is extracted concurrently, then its
+    #: rows are written and exported together. Larger than 1 so there is something to
+    #: parallelise; small enough that the UI still fills in during the run rather
+    #: than at the end.
+    chunk_size = max(1, getattr(config, "EXTRACT_CONCURRENCY", 4))
 
     def __init__(self, raw_dir: pathlib.Path | None = None):
         from agents import extract as extract_mod
@@ -299,13 +301,40 @@ class ExtractAgent:
             return []
 
     def run(self, items, llm, **kw) -> list[dict]:
+        """Extract a chunk of documents, several at a time.
+
+        Each document is an independent model call that spends nearly all of its
+        wall clock waiting on the API, so threads are the right tool and the GIL is
+        not the constraint -- the account's rate limit is. Concurrency is
+        config.EXTRACT_CONCURRENCY (default 4).
+
+        Rows are reassembled in the order `items` were given, not the order the
+        calls happened to finish, so a run stays reproducible: award_uid already
+        makes rows content-addressed, but a stable order keeps diffs and exports
+        byte-comparable between runs.
+        """
         model = kw.get("model") or BULK_MODEL
-        rows: list[dict] = []
         self._results = {}
-        for aid in items:
-            ann = self._announcement(str(aid))
-            res = self._m.extract_document(ann, llm, model=model, raw_dir=self.raw_dir)
-            self._results[str(aid)] = res
+        ids = [str(a) for a in items]
+        workers = min(getattr(config, "EXTRACT_CONCURRENCY", 4), len(ids)) or 1
+
+        def one(aid: str):
+            ann = self._announcement(aid)
+            return aid, self._m.extract_document(ann, llm, model=model,
+                                                 raw_dir=self.raw_dir)
+
+        if workers <= 1 or len(ids) <= 1:
+            done = [one(a) for a in ids]
+        else:
+            with cf.ThreadPoolExecutor(max_workers=workers) as pool:
+                # map() propagates the first exception, which is what we want: the
+                # caller already turns a chunk failure into a per-item retry when
+                # that is free, and must not silently drop a document.
+                done = list(pool.map(one, ids))
+
+        rows: list[dict] = []
+        for aid, res in done:
+            self._results[aid] = res
             rows.extend(res.awards)
         return rows
 
