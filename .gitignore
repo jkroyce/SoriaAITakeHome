@@ -21,3 +21,4 @@ data/*.duckdb
 
 # agent worktrees are checkouts, not content
 .claude/worktrees/
+data/*.duckdb.wal

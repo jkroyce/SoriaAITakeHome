@@ -259,6 +259,11 @@ class ExtractAgent:
 
     name = "extract"
 
+    #: One document per dispatch. extract_document() is already one model call per
+    #: announcement, so this costs nothing and lets each document land in the DB and
+    #: the exports as soon as it is parsed.
+    chunk_size = 1
+
     def __init__(self, raw_dir: pathlib.Path | None = None):
         from agents import extract as extract_mod
         self._m = extract_mod
@@ -1054,13 +1059,47 @@ def _tick_body(conn, mode, tick_id, max_spend, agents_dir, raw_dir,
             items = []
         if limit:
             items = items[:limit]
-        d = dispatch(agent, items, llm, conn, tick_id=tick_id)
-        dispatches.append(d)
-        all_runs.extend(d.runs)
-        wrote = ", ".join(f"{v} -> {k}" for k, v in sorted(d.written.items())) or "-"
-        flag = f", {len(d.reviews)} flagged for review" if d.reviews else ""
+
+        # Persist as we go, so the UI has rows during the run rather than only after
+        # it. `chunk_size` is the agent's own call: extract already makes one model
+        # call per document, so a chunk of 1 costs it nothing, while the resolver and
+        # scorer batch 25 names per call and must NOT be split -- that turns one call
+        # into 25, exactly the cost bug cost-guard warns about. An agent declaring no
+        # chunk size keeps the old behaviour: a single dispatch for everything.
+        size = getattr(agent, "chunk_size", None) or len(items) or 1
+        chunks = [items[k:k + size] for k in range(0, len(items), size)] or [[]]
+        incremental = len(chunks) > 1
+
+        written: dict[str, int] = {}
+        reviews, note = 0, None
+        for ci, chunk in enumerate(chunks, 1):
+            d = dispatch(agent, chunk, llm, conn, tick_id=tick_id)
+            dispatches.append(d)
+            reviews += len(d.reviews)
+            note = d.note or note
+            for k, v in d.written.items():
+                written[k] = written.get(k, 0) + v
+            if not incremental:
+                all_runs.extend(d.runs)
+                continue
+            # dispatch() already wrote the rows to DuckDB; these two make them
+            # visible to the UI, which reads the exports and never blocks on us.
+            store.upsert(conn, "agent_runs", d.runs)
+            if do_export:
+                try:
+                    store.export(conn)
+                except Exception as exc:
+                    print(f"  ! incremental export failed: "
+                          f"{type(exc).__name__}: {exc}", flush=True)
+            done = sum(len(c) for c in chunks[:ci])
+            got = ", ".join(f"{v} -> {k}" for k, v in sorted(d.written.items()))
+            print(f"  {agent.name:20s} {done:4d}/{len(items)}   {got or chr(45)}"
+                  + (f"   ! {d.note}" if d.note else ""), flush=True)
+
+        wrote = ", ".join(f"{v} -> {k}" for k, v in sorted(written.items())) or "-"
+        flag = f", {reviews} flagged for review" if reviews else ""
         print(f"  {agent.name:20s} {len(items):4d} item(s)   {wrote}{flag}"
-              + (f"\n      {d.note}" if d.note else ""))
+              + (f"\n      {note}" if note else ""), flush=True)
 
     if all_runs:
         store.upsert(conn, "agent_runs", all_runs)

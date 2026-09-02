@@ -16,6 +16,7 @@ one implementation, two entry points.
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -29,8 +30,16 @@ PY = str(VENV_PY) if VENV_PY.exists() else sys.executable
 
 
 def sh(args: list[str], **kw) -> int:
-    print(f"  $ {' '.join(str(a) for a in args)}")
-    return subprocess.run(args, cwd=ROOT, **kw).returncode
+    """Run a child task, streaming its output as it happens.
+
+    PYTHONUNBUFFERED matters more than it looks: a child writing to a pipe
+    block-buffers stdout, so a long task (`live` takes about an hour over 50
+    documents) prints nothing at all until it exits. That is indistinguishable
+    from a hang, and on a paid run it hides how much has been spent so far.
+    """
+    print(f"  $ {' '.join(str(a) for a in args)}", flush=True)
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    return subprocess.run(args, cwd=ROOT, env=env, **kw).returncode
 
 
 def _missing(module: str, task: str) -> int:
