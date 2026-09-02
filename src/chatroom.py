@@ -2,10 +2,10 @@
 
 Why this exists: parallel agents are otherwise opaque. You can see the final diff,
 but not who was spawned, what they were told to do, what they got stuck on, or which
-decisions they made along the way. `chatroom.md` makes all of that visible in one
+decisions they made along the way. `ai-sessions/chatroom.md` makes all of that visible in one
 human-readable file, live, while the work is happening.
 
-THE WORKTREE PROBLEM (and why this module is not just `open("chatroom.md", "a")`):
+THE WORKTREE PROBLEM (and why this is not just `open("ai-sessions/chatroom.md", "a")`):
 each build agent runs in its own git worktree, which is a separate checkout with its
 own copy of every tracked file. A relative path would give each agent a private
 chatroom nobody else can see -- the exact opposite of the point. So the path is
@@ -26,7 +26,10 @@ import sys
 import time
 from datetime import datetime, timezone
 
-FILENAME = "chatroom.md"
+#: Lives with the other build-time AI records rather than at the repo root. It is
+#: evidence of how this was built, not documentation anyone runs the system from, and
+#: the root is what a reviewer reads first.
+FILENAME = pathlib.Path("ai-sessions") / "chatroom.md"
 _MAX_APPEND_RETRIES = 8
 
 KINDS = {
@@ -76,6 +79,7 @@ def _append(line: str) -> None:
     mode is atomic enough in practice; the retry covers Windows sharing violations.
     """
     p = path()
+    p.parent.mkdir(parents=True, exist_ok=True)
     for attempt in range(_MAX_APPEND_RETRIES):
         try:
             with open(p, "a", encoding="utf-8", newline="\n") as fh:

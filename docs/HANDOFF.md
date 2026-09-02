@@ -12,7 +12,7 @@ enough to continue. Do not re-derive anything below; it is all verified.
 - `src/fetch.py` — acquisition. Uses `curl_cffi` with `impersonate="chrome"`; Akamai
   fingerprints the TLS handshake, so plain `requests` gets 403 even with perfect headers.
 - `src/llm.py` — `CachedLLM`. The only thing allowed to call the API.
-- `src/chatroom.py` + `chatroom.md` — shared agent activity log, resolves to the main
+- `src/chatroom.py` + `ai-sessions/chatroom.md` — shared agent activity log, resolves to the main
   repo root from inside any worktree.
 - `scripts/agent_usage.py` — token/spend tracking, build-time vs runtime, spike detection.
 - `scripts/export_sessions.py` — exports transcripts from BOTH project directories.
