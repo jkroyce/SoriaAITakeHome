@@ -720,6 +720,18 @@ def tier_text(v) -> str:
 # another panel onto an already dense page.
 # ---------------------------------------------------------------------------------
 
+TICKER_COL = st.column_config.LinkColumn(
+    "Ticker", help="Open this ticker's awards", display_text=r"ticker=([A-Z.]+)")
+
+
+def ticker_link(v) -> str:
+    """A ticker cell rendered as a link. st.dataframe cannot attach a callback to a
+    cell, and row-selection swallows the click, so the cell carries a query-param
+    URL and the shell opens the modal on the resulting rerun."""
+    t = txt(v, "")
+    return f"?ticker={t}" if t and t != DASH else ""
+
+
 @st.dialog("Awards", width="large")
 def ticker_dialog(frames, df, ticker: str) -> None:
     """Every award for one ticker. Opened by clicking the ticker in any table."""
@@ -762,16 +774,13 @@ def provenance_dialog(frames, r) -> None:
     provenance_panel(frames, r)
 
 
-def _change_events(frames, df):
-    """The actual change feed: rows of `changes`, enriched from `awards`.
-
-    "What is new" is a set difference on award UIDs computed upstream by the
-    manager -- deterministic, never an agent (CLAUDE.md). This view only
-    displays what that difference found. Returns True when it rendered.
-    """
+def view_events(frames, df):
+    """Tab 1 -- change events only. One table on the page."""
     ch = frames.get("changes")
     if ch is None or ch.empty:
-        return False
+        empty_state("changes", "Change events appear here once `manager tick` has "
+                               "diffed award UIDs against the previous run.")
+        return
 
     cols = ["award_uid", "contractor_raw", "amount_usd", "action_type", "service_branch"]
     ev = ch.merge(df[[c for c in cols if c in df.columns]].drop_duplicates("award_uid"),
@@ -779,22 +788,24 @@ def _change_events(frames, df):
     ev = ev.sort_values(["materiality_score", "detected_at"],
                         ascending=[False, False], na_position="last")
 
-    st.caption(f"{len(ev):,} change event(s), most material first. "
-               "Select one for its provenance.")
+    metric_row([
+        ("Events", f"{len(ev):,}"),
+        ("Tickers", f"{ev['ticker'].nunique():,}"),
+        ("Value", usd(ev["amount_usd"].sum(min_count=1))),
+    ])
+
     sel = show_table(pd.DataFrame({
         "Detected": ev["detected_at"].map(iso_ts),
         "Change": ev["change_type"].map(lambda v: txt(v).replace("_", " ")),
         "Score": ev["materiality_score"],
-        "Ticker": ev["ticker"].map(lambda v: txt(v, "private")),
+        "Ticker": ev["ticker"].map(ticker_link),
         "Contractor": ev["contractor_raw"].map(txt),
         "Amount": ev["amount_usd"].map(usd),
         "Was": ev["prev_value"].map(txt),
         "Now": ev["new_value"].map(txt),
-    }), height=240, key="change_events", select=True)
+    }), height=520, key="change_events", select=True,
+        column_config={"Ticker": TICKER_COL})
 
-    # A change event is an award UID plus what changed, so its provenance is the
-    # provenance of that award -- resolved through the enriched frame rather than
-    # re-derived here.
     try:
         picked = list(sel.selection.rows)
     except Exception:
@@ -803,36 +814,21 @@ def _change_events(frames, df):
         uid = ev.iloc[picked[0]]["award_uid"]
         match = df[df["award_uid"] == uid]
         if match.empty:
-            st.warning(f"No award row for `{uid}` in this export, so there is no "
-                       "provenance to show. The change event references an award "
-                       "that has not been extracted yet.")
+            st.warning(f"No award row for `{uid}` in this export.")
         else:
             provenance_dialog(frames, match.iloc[0])
-    st.divider()
-    return True
 
 
 def view_feed(frames, df):
-    st.subheader("Change feed")
-    st.caption("Recent awards ranked by materiality. The ranking is a sort on the score "
-               "the scoring agent assigned; the agent judges whether a change matters, "
-               "never whether one occurred.")
-
-    rendered = _change_events(frames, df)
-    if not rendered:
-        st.caption("No change events recorded yet -- `changes` is populated by "
-                   "`manager tick`, which diffs award UIDs against the last run. "
-                   "Showing the materiality-ranked award list below.")
-
+    """Tab 2 -- awards, materiality-ranked. One table on the page."""
     if df.empty:
-        empty_state("awards", "This is the landing view: recent awards ranked by "
-                              "investor materiality.")
+        empty_state("awards", "Awards ranked by investor materiality appear here.")
         return
 
-    tick_opts = ["all"] + sorted({str(t) for t in df["ticker"].dropna().unique()})
     with st.popover("Filters", width="content"):
         tiers = st.multiselect("Tier", TIER_ORDER, default=TIER_ORDER)
-        ticker = st.selectbox("Ticker", tick_opts)
+        ticker = st.selectbox(
+            "Ticker", ["all"] + sorted({str(t) for t in df["ticker"].dropna().unique()}))
         branches = st.multiselect(
             "Branch", sorted({str(b) for b in df["service_branch"].dropna().unique()}))
         days = st.number_input("Lookback (days)", min_value=1, max_value=3650,
@@ -853,7 +849,7 @@ def view_feed(frames, df):
                       ascending=[True, False, False], na_position="last")
 
     metric_row([
-        ("Awards in view", f"{len(f):,}"),
+        ("Awards", f"{len(f):,}"),
         ("Alerts", f"{int((f['tier'] == 'alert').sum()):,}"),
         ("Obligated", usd(f["amount_usd"].sum(min_count=1))),
     ])
@@ -862,21 +858,19 @@ def view_feed(frames, df):
         st.warning("No awards match these filters.")
         return
 
-    view = pd.DataFrame({
+    ev = show_table(pd.DataFrame({
         "Date": f["announced_date"].map(iso_date),
         "Tier": f["tier"].map(tier_text),
         "Score": f["score"],
-        "Ticker": f["ticker"].map(lambda v: txt(v, "private")),
+        "Ticker": f["ticker"].map(ticker_link),
         "Contractor": f["contractor_raw"].map(txt),
         "Amount": f["amount_usd"].map(usd),
         "Action": f["action_type"].map(lambda v: txt(v).replace("_", " ")),
         "Branch": f["service_branch"].map(txt),
-    })
-    ev = show_table(view, tier_col="Tier", height=420, key="feed_table", select=True,
-                    column_config={"Score": st.column_config.NumberColumn(
-                        "Score", help="0-100 investor relevance", format="%d")})
+    }), tier_col="Tier", height=520, key="feed_table", select=True,
+        column_config={"Ticker": TICKER_COL,
+                       "Score": st.column_config.NumberColumn("Score", format="%d")})
 
-    st.caption("Select a row for its provenance, or click a ticker for its awards.")
     try:
         rows = list(ev.selection.rows)
     except Exception:
@@ -884,24 +878,12 @@ def view_feed(frames, df):
     if rows:
         provenance_dialog(frames, f.iloc[rows[0]])
 
-    # A dataframe cell cannot carry a click handler, so the tickers present in the
-    # current view get their own control strip.
-    present = [t for t in sorted({str(x) for x in f["ticker"].dropna().unique()})]
-    if present:
-        st.caption("Awards by ticker")
-        for i in range(0, len(present), 10):
-            row = present[i:i + 10]
-            for col, tk in zip(st.columns(10), row):
-                if col.button(tk, key=f"tkbtn_{tk}", width="stretch"):
-                    ticker_dialog(frames, df, tk)
-
 
 # ---------------------------------------------------------------------------------
 # View 2 -- company view
 # ---------------------------------------------------------------------------------
 
 def view_company(frames, df):
-    st.subheader("Company view")
     if df.empty:
         empty_state("awards", "Pick a ticker to see its awards, totals and trend.")
         return
@@ -977,10 +959,6 @@ def view_company(frames, df):
 # ---------------------------------------------------------------------------------
 
 def view_review(frames):
-    st.subheader("Review queue")
-    st.caption(f"Rows an agent was not confident about. Below the {CONFIDENCE_FLOOR:.1f} "
-               "floor the manager retries on Opus; still uncertain, the row lands here "
-               "for a human. Visible uncertainty is the feature.")
     rq = frames["review_queue"]
     if rq.empty:
         empty_state("review_queue", "Low-confidence rows the agents flagged for a human "
@@ -1037,10 +1015,6 @@ def view_review(frames):
 # ---------------------------------------------------------------------------------
 
 def view_agents(frames):
-    st.subheader("Agent activity")
-    st.caption("Every dispatch the manager made. A cache hit costs nothing and is the "
-               "whole point of the architecture: an agent reasons once, deterministic "
-               "code applies that reasoning forever.")
     ar = frames["agent_runs"]
     if ar.empty:
         empty_state("agent_runs", "What ran, on which model, cache hit or not, tokens, "
@@ -1059,19 +1033,17 @@ def view_agents(frames):
     ])
     api_calls = int((~hits).sum())
     per_call = f"${cost.sum() / api_calls:.4f}" if api_calls else DASH
-    st.caption(f"{api_calls:,} of {len(ar):,} dispatches actually called the API. "
-               f"Mean cost per API call {per_call}.")
-
     work = ar.assign(_hit=hits, _cost=cost, _esc=escalated)
-    by_agent = work.groupby("agent", as_index=False).agg(
-        runs=("run_id", "count"), hits=("_hit", "sum"), escalations=("_esc", "sum"),
-        input_tokens=("input_tokens", "sum"), output_tokens=("output_tokens", "sum"),
-        spend=("_cost", "sum"), mean_conf=("confidence", "mean"))
-    by_agent["hit_rate"] = by_agent["hits"] / by_agent["runs"]
+    breakdown = st.segmented_control(
+        "Breakdown", ["Dispatches", "By agent", "By model", "By outcome"],
+        default="Dispatches", label_visibility="collapsed")
 
-    left, right = st.columns([3, 2])
-    with left:
-        st.markdown("**By agent**")
+    if breakdown == "By agent":
+        by_agent = work.groupby("agent", as_index=False).agg(
+            runs=("run_id", "count"), hits=("_hit", "sum"), escalations=("_esc", "sum"),
+            input_tokens=("input_tokens", "sum"), output_tokens=("output_tokens", "sum"),
+            spend=("_cost", "sum"), mean_conf=("confidence", "mean"))
+        by_agent["hit_rate"] = by_agent["hits"] / by_agent["runs"]
         show_table(pd.DataFrame({
             "Agent": by_agent["agent"].map(txt),
             "Runs": by_agent["runs"],
@@ -1084,51 +1056,46 @@ def view_agents(frames):
                 lambda v: f"{int(v):,}" if pd.notna(v) else DASH),
             "Spend": by_agent["spend"].map(lambda v: f"${v:,.4f}"),
             "Mean conf.": by_agent["mean_conf"].map(conf),
-        }))
-    with right:
-        st.markdown("**Spend by agent**")
-        st.bar_chart(by_agent[["agent", "spend"]], x="agent", y="spend", x_label="",
-                     y_label="USD", height=240)
+        }), height=480)
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("**By model**")
+    elif breakdown == "By model":
         bm = work.groupby("model", as_index=False).agg(
             runs=("run_id", "count"), hits=("_hit", "sum"), spend=("_cost", "sum"))
         show_table(pd.DataFrame({"Model": bm["model"].map(txt), "Runs": bm["runs"],
                                  "Cache hits": bm["hits"].astype(int),
-                                 "Spend": bm["spend"].map(lambda v: f"${v:,.4f}")}))
-    with c2:
-        st.markdown("**By outcome**")
-        bo = ar.groupby(ar["outcome"].map(txt), as_index=False).agg(runs=("run_id", "count"))
-        bo.columns = ["Outcome", "Runs"]
-        show_table(bo)
+                                 "Spend": bm["spend"].map(lambda v: f"${v:,.4f}")}),
+                   height=480)
 
-    st.markdown("**Recent dispatches**")
-    hide_hits = st.toggle("Hide cache hits", value=False)
-    recent = work[~work["_hit"]] if hide_hits else work
-    recent = recent.sort_values("started_at", ascending=False,
-                                na_position="last").head(300)
-    show_table(pd.DataFrame({
-        "Started": recent["started_at"].map(iso_ts),
-        "Tick": recent["tick_id"].map(txt),
-        "Agent": recent["agent"].map(txt),
-        "Item": recent["item_key"].map(lambda v: txt(v)[:28]),
-        "Model": recent["model"].map(txt),
-        "Cache": recent["_hit"].map(lambda v: "hit" if v else "miss"),
-        "Esc.": recent["_esc"].map(lambda v: "yes" if v else ""),
-        "In": recent["input_tokens"].map(
-            lambda v: f"{int(v):,}" if pd.notna(v) else DASH),
-        "Out": recent["output_tokens"].map(
-            lambda v: f"{int(v):,}" if pd.notna(v) else DASH),
-        "Cost": recent["cost_usd"].map(
-            lambda v: f"${float(v):.4f}" if pd.notna(v) else DASH),
-        "Conf.": recent["confidence"].map(conf),
-        "Outcome": recent["outcome"].map(txt),
-        "ms": recent["duration_ms"].map(
-            lambda v: f"{int(v):,}" if pd.notna(v) else DASH),
-        "Skills": recent["skills_version"].map(txt),
-    }), height=420)
+    elif breakdown == "By outcome":
+        bo = ar.groupby(ar["outcome"].map(txt), as_index=False).agg(
+            runs=("run_id", "count"))
+        bo.columns = ["Outcome", "Runs"]
+        show_table(bo, height=480)
+
+    else:
+        recent = work[~work["_hit"]] if st.toggle("Hide cache hits", value=False) else work
+        recent = recent.sort_values("started_at", ascending=False,
+                                    na_position="last").head(300)
+        show_table(pd.DataFrame({
+            "Started": recent["started_at"].map(iso_ts),
+            "Tick": recent["tick_id"].map(txt),
+            "Agent": recent["agent"].map(txt),
+            "Item": recent["item_key"].map(lambda v: txt(v)[:28]),
+            "Model": recent["model"].map(txt),
+            "Cache": recent["_hit"].map(lambda v: "hit" if v else "miss"),
+            "Esc.": recent["_esc"].map(lambda v: "yes" if v else ""),
+            "In": recent["input_tokens"].map(
+                lambda v: f"{int(v):,}" if pd.notna(v) else DASH),
+            "Out": recent["output_tokens"].map(
+                lambda v: f"{int(v):,}" if pd.notna(v) else DASH),
+            "Cost": recent["cost_usd"].map(
+                lambda v: f"${float(v):.4f}" if pd.notna(v) else DASH),
+            "Conf.": recent["confidence"].map(conf),
+            "Outcome": recent["outcome"].map(txt),
+            "ms": recent["duration_ms"].map(
+                lambda v: f"{int(v):,}" if pd.notna(v) else DASH),
+            "Skills": recent["skills_version"].map(txt),
+        }), height=480)
 
     errs = ar[ar["outcome"] == "failed"]
     if not errs.empty:
@@ -1196,8 +1163,7 @@ def provenance_panel(frames, r) -> None:
         st.write(f"`drivers` {', '.join(str(d) for d in drivers) if drivers else DASH}")
         st.write(f"`scorer_model` {txt(r.get('scorer_model'))}")
 
-    st.caption("REASONING CHAIN — every AI-derived field resolves to one cached "
-               "model call")
+    st.caption("REASONING CHAIN")
     show_table(pd.DataFrame([
         {"Step": "extract", "Model": txt(r.get("extractor_model")),
          "Confidence": conf(r.get("extraction_confidence")),
@@ -1236,32 +1202,6 @@ def provenance_panel(frames, r) -> None:
                  for c in TABLE_COLS["awards"] if c in r.index})
 
 
-def view_provenance(frames, df):
-    st.subheader("Provenance drill-down")
-    st.caption("Every number traces to a source document and to a specific model call.")
-    if df.empty:
-        empty_state("awards", "Choose an award to see its source URL, fetch timestamp, "
-                              "sha256 and the cache keys of the model calls behind it.")
-        return
-    order = df.sort_values(["announced_date", "amount_usd"], ascending=False,
-                           na_position="last").reset_index(drop=True)
-    q = st.text_input("Filter awards",
-                      placeholder="ticker, contractor, contract number or award_uid")
-    if q:
-        ql = q.lower()
-        keys = ("ticker", "contractor_raw", "contract_number", "award_uid",
-                "announcement_id")
-        mask = order.apply(
-            lambda r: ql in " ".join(str(r.get(c, "")).lower() for c in keys), axis=1)
-        order = order[mask].reset_index(drop=True)
-    if order.empty:
-        st.warning("Nothing matches that filter.")
-        return
-    i = st.selectbox("Award", range(len(order)),
-                     format_func=lambda i: order.loc[i, "label"])
-    provenance_panel(frames, order.iloc[i])
-
-
 # ---------------------------------------------------------------------------------
 # Shell
 # ---------------------------------------------------------------------------------
@@ -1291,9 +1231,6 @@ def main() -> None:
     else:
         st.sidebar.success("Loaded: " + ", ".join(found))
 
-    view = st.sidebar.radio("View", ["Change feed", "Company", "Review queue",
-                                     "Agent activity", "Provenance"])
-
     with st.sidebar.expander("Data source"):
         rows = []
         for t in UI_TABLES:
@@ -1308,30 +1245,31 @@ def main() -> None:
     for t, msg in errors.items():
         st.sidebar.error(f"{t}: {msg}")
 
-    head, badge = st.columns([5, 2])
-    head.markdown("### DoD Contract Terminal")
+    # A ticker cell is a link carrying ?ticker=XX. Consume it here, open the modal,
+    # and clear it so a rerun does not reopen the same dialog forever.
+    picked_ticker = st.query_params.get("ticker")
+    if picked_ticker:
+        del st.query_params["ticker"]
+
     if demo:
-        badge.warning("SYNTHETIC DEMO DATA — not real awards", icon=":material/science:")
-    with st.expander("What this is"):
-        st.caption("Department of War daily contract awards above $7.5M — extracted "
-                   "from prose, resolved to tickers, scored for investor materiality. "
-                   "A read-only view over exported Parquet: ranking is a sort, change "
-                   "detection is a set difference, totals are a groupby. No model call "
-                   "happens in this process, and every column name comes from "
-                   "src/schemas.py, the frozen contract.")
+        st.warning("SYNTHETIC DEMO DATA — not real awards", icon=":material/science:")
 
     df = enrich(frames)
 
-    if view == "Change feed":
+    if picked_ticker:
+        ticker_dialog(frames, df, str(picked_ticker))
+
+    tabs = st.tabs(["Events", "Awards", "Companies", "Review", "Agents"])
+    with tabs[0]:
+        view_events(frames, df)
+    with tabs[1]:
         view_feed(frames, df)
-    elif view == "Company":
+    with tabs[2]:
         view_company(frames, df)
-    elif view == "Review queue":
+    with tabs[3]:
         view_review(frames)
-    elif view == "Agent activity":
+    with tabs[4]:
         view_agents(frames)
-    else:
-        view_provenance(frames, df)
 
 
 
