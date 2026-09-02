@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "key": "normalized contractor name (see resolve_entity.normalize); raw_variants lists every printed spelling that maps here. entities.contractor_raw stays RAW -- this key is not that key.",
-  "updated_at": "2026-09-02T16:09:57+00:00",
-  "n_entities": 889,
+  "updated_at": "2026-09-02T19:12:09+00:00",
+  "n_entities": 895,
   "entities": {
     "1080 constructors": {
       "contractor_raw": "1080 Constructors",
@@ -104,6 +104,23 @@
       "skills_version": "sk-5c88474c",
       "raw_variants": [
         "A3L Federal Works,*"
+      ]
+    },
+    "aacon ravenvolt jv": {
+      "contractor_raw": "AACON-Ravenvolt JV LLC,*",
+      "normalized_name": "AACON-Ravenvolt JV",
+      "ticker": null,
+      "parent_company": null,
+      "relationship": "joint_venture",
+      "is_public": false,
+      "confidence": 0.75,
+      "reasoning": "A joint venture between two small private contractors; neither AACON nor Ravenvolt appears to be a listed company.",
+      "resolved_at": "2026-09-02T19:12:01+00:00",
+      "resolver_model": "claude-haiku-4-5",
+      "llm_cache_key": "514b743cf8de55988a48a7ae685ab7d89d49548902d30bd48ea59b3f7f39e887",
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "AACON-Ravenvolt JV LLC,*"
       ]
     },
     "aaecon general contracting": {
@@ -1182,6 +1199,40 @@
       "skills_version": "sk-5c88474c",
       "raw_variants": [
         "ASRC Research and Technology Solutions LLC"
+      ]
+    },
+    "atap": {
+      "contractor_raw": "ATAP",
+      "normalized_name": "ATAP",
+      "ticker": null,
+      "parent_company": null,
+      "relationship": "private",
+      "is_public": false,
+      "confidence": 0.8,
+      "reasoning": "ATAP does not match any known public company; most likely a small private engineering or defense contractor below the prominence threshold.",
+      "resolved_at": "2026-09-02T19:12:01+00:00",
+      "resolver_model": "claude-haiku-4-5",
+      "llm_cache_key": "514b743cf8de55988a48a7ae685ab7d89d49548902d30bd48ea59b3f7f39e887",
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "ATAP"
+      ]
+    },
+    "atec": {
+      "contractor_raw": "ATEC",
+      "normalized_name": "ATEC",
+      "ticker": null,
+      "parent_company": null,
+      "relationship": "private",
+      "is_public": false,
+      "confidence": 0.8,
+      "reasoning": "ATEC is not a recognized listed company and appears to be a private defense or technical services firm common among DoD contractors.",
+      "resolved_at": "2026-09-02T19:12:01+00:00",
+      "resolver_model": "claude-haiku-4-5",
+      "llm_cache_key": "514b743cf8de55988a48a7ae685ab7d89d49548902d30bd48ea59b3f7f39e887",
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "ATEC"
       ]
     },
     "athena engineering and environmental": {
@@ -3687,6 +3738,23 @@
       "skills_version": "sk-5c88474c",
       "raw_variants": [
         "Curtin Maritime Corp."
+      ]
+    },
+    "cvi": {
+      "contractor_raw": "CVI",
+      "normalized_name": "CVI",
+      "ticker": null,
+      "parent_company": null,
+      "relationship": "private",
+      "is_public": false,
+      "confidence": 0.75,
+      "reasoning": "CVI is a generic acronym with no clear match to a public company; likely a small private contractor.",
+      "resolved_at": "2026-09-02T19:12:01+00:00",
+      "resolver_model": "claude-haiku-4-5",
+      "llm_cache_key": "514b743cf8de55988a48a7ae685ab7d89d49548902d30bd48ea59b3f7f39e887",
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "CVI"
       ]
     },
     "cye enterprises": {
@@ -8582,6 +8650,23 @@
       "skills_version": "sk-5c88474c",
       "raw_variants": [
         "MABA Aero LLC"
+      ]
+    },
+    "maccaferri": {
+      "contractor_raw": "Maccaferri Inc.",
+      "normalized_name": "Maccaferri",
+      "ticker": null,
+      "parent_company": null,
+      "relationship": "private",
+      "is_public": false,
+      "confidence": 0.85,
+      "reasoning": "Maccaferri is a known international geotechnical and civil engineering firm, but its U.S. subsidiary or division does not appear to be publicly listed.",
+      "resolved_at": "2026-09-02T19:12:01+00:00",
+      "resolver_model": "claude-haiku-4-5",
+      "llm_cache_key": "514b743cf8de55988a48a7ae685ab7d89d49548902d30bd48ea59b3f7f39e887",
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "Maccaferri Inc."
       ]
     },
     "macdonald bedford": {
@@ -13645,6 +13730,23 @@
       "skills_version": "sk-5c88474c",
       "raw_variants": [
         "TLN Worldwide Enterprise,*"
+      ]
+    },
+    "toda nudp jv": {
+      "contractor_raw": "TODA-NUDP JV",
+      "normalized_name": "TODA-NUDP JV",
+      "ticker": null,
+      "parent_company": null,
+      "relationship": "joint_venture",
+      "is_public": false,
+      "confidence": 0.75,
+      "reasoning": "A joint venture between TODA and NUDP; neither component appears to be a publicly listed company.",
+      "resolved_at": "2026-09-02T19:12:01+00:00",
+      "resolver_model": "claude-haiku-4-5",
+      "llm_cache_key": "514b743cf8de55988a48a7ae685ab7d89d49548902d30bd48ea59b3f7f39e887",
+      "skills_version": "sk-5c88474c",
+      "raw_variants": [
+        "TODA-NUDP JV"
       ]
     },
     "topside contracting": {

@@ -14,6 +14,7 @@ one implementation, two entry points.
     python run.py chat      # tail the agent chatroom
     python run.py cost      # what the cache holds and what it saved
     python run.py golden    # score extraction against the golden fixtures
+    python run.py diagnose  # check the pipeline's own output for defects
 """
 from __future__ import annotations
 
@@ -154,6 +155,14 @@ def task_golden(*args: str) -> int:
     # Cache mode by default: BLOCKED (exit 2) until the paid pass runs, which is
     # honest -- a blocked case is never counted as a pass.
     return sh([PY, str(runner), *args])
+
+
+def task_diagnose(*args: str) -> int:
+    """Check what acquisition and extraction produced, and report what looks wrong."""
+    agent = SRC / "agents" / "diagnose.py"
+    if not agent.exists():
+        return _missing("src/agents/diagnose.py", "diagnose")
+    return sh([PY, str(agent), "--report", *args])
 
 
 def task_cost() -> int:

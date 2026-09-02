@@ -28,11 +28,13 @@ produces:
 
 ```
 50 announcements · 1,182 events · 1,128 contracts · 941 companies
-llm: 0 live calls, 56 cache hits, $0.0000
+23 alerts · 155 notable · 1,004 routine
+llm: 0 live calls, 101 cache hits, $0.0000
 ```
 
-Those are the same numbers the real paid run produced. Nothing is stubbed — the agents
-genuinely run, they just get their answers from cache instead of the API.
+Those are the same numbers the $1.22 paid run produced, down to which awards escalated
+to the more expensive model. Nothing is stubbed — the agents genuinely run, they just
+get their answers from cache instead of the API.
 
 **Want to prove it's real on your own key?**
 
@@ -44,7 +46,7 @@ python run.py trial                            # one fresh document, live, cappe
 That fetches today's announcements and processes one document the cache has never
 seen. It's the honest answer to "is the cache just a fixture?"
 
-Full run over all 50 documents is `python run.py live` (~$2.35, capped at $5.00).
+Full run over all 50 documents is `python run.py live` (capped at $5.00).
 
 ---
 
@@ -77,6 +79,31 @@ chose.
 
 ---
 
+## The pipeline checks its own work
+
+`src/agents/diagnose.py` reads what the fetching and extraction actually produced and
+asks whether the *code* is wrong. Eleven deterministic checks find symptoms — documents
+that returned no text, modifications naming no contract, amounts that cannot be right —
+and only when something fires does a model get asked the question a threshold can't
+answer: is this the source changing shape, a gap in the extraction rules, something the
+schema can't express, or just messy source text?
+
+It **proposes** fixes and never applies them. It can suggest a rule for
+`skills/extraction.md`, which then has to survive the golden tests. It cannot touch the
+schema or any other source file — it writes a proposal to `data/diagnosis/` and flags a
+human. It's judging the output of the code it would be editing, so an auto-applied
+wrong diagnosis would erase its own evidence.
+
+```bash
+python run.py diagnose    # run the checks, print findings — free, no API key
+```
+
+On the current corpus it finds 5 things, including 3 modifications that name no
+contract to modify (a violation of the extractor's own rule R-002) and 15 awards with
+no dollar amount.
+
+---
+
 ## Limits I set to avoid scope creep
 
 - No second AI verification layer over the extraction.
@@ -94,7 +121,7 @@ chose.
 |---|---|
 | `src/schemas.py` | The data contract. One field list generates both the JSON schema sent to the model and the DuckDB DDL. |
 | `src/fetch.py` | Acquisition. war.gov fingerprints the TLS handshake, so this uses `curl_cffi`. |
-| `src/agents/` | The three agents: extract, resolve entity, score materiality. |
+| `src/agents/` | Four agents: extract, resolve entity, score materiality, and diagnose. |
 | `src/manager.py` | Orchestration, spend caps, change detection, contract aggregation. |
 | `app.py` | The Streamlit terminal. |
 | `cache/llm/` | Every model response, keyed by input hash. Committed on purpose. |
@@ -102,7 +129,7 @@ chose.
 | `tests/golden/` | Hand-verified fixtures that gate whether a new rule is accepted. |
 
 ```bash
-python run.py test       # 70 tests
+python run.py test       # 72 tests
 python run.py golden     # extraction scored against hand-verified fixtures
 python run.py cost       # what the cache holds and what it saved
 ```

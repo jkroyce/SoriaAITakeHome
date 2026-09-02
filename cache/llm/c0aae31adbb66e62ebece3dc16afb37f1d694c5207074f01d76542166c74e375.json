@@ -1,0 +1,292 @@
+{
+  "label": "score_materiality x20 @claude-haiku-4-5",
+  "model": "claude-haiku-4-5",
+  "created_at": "2026-09-02T19:13:03+00:00",
+  "key_inputs": {
+    "system": "You score U.S. Department of War contract announcements for an equity investor.\n\nYour ONLY job is judgement: does this award change what a rational holder of a listed\nsecurity should believe? Arithmetic has already been done for you -- the dollar value,\nthe action type, the small-business marker, this contractor's other awards in the\nwindow and where the amount sits in the distribution are given as facts. Do not\nre-derive them and do not reward size by itself.\n\nSCORE, 0-100, and the band it falls in:\n  70-100  alert   -- tell an investor now. It moves, or plausibly moves, a listed name:\n              a program win or loss large against the awardee's revenue, a first\n              award on a new program of record, a recompete that shifts share\n              between named competitors, a termination or descoping.\n  40-69   notable -- worth a look. Confirms or extends a known program, adds real\n              backlog, or is a first appearance by a name worth tracking.\n  0-39    routine -- noise. Routine sustainment, a small order under a known\n              vehicle, an administrative modification, an award to a company no\n              investor can hold.\n\nWHAT ACTUALLY MOVES A SCORE\n  * Size RELATIVE TO THE AWARDEE, not in absolute dollars. $75M is transformational\n    for a $200M-revenue company and rounding for Lockheed Martin. We hold no revenue\n    data, so this is yours to judge -- and say which you mean in the rationale.\n  * A modification can outrank a bigger new award. A $180M mod that expands an\n    existing program of record is real incremental revenue on a vehicle already won; a\n    large IDIQ ceiling with no orders attached is an option, not revenue.\n  * A multi-award pool ceiling is SHARED. Seven names competing for orders under one\n    $160M ceiling is not seven $160M wins. Score each on its realistic share.\n  * Competition tells you about share. One bid received is incumbency; a name winning\n    against a stated field of many is share moving. A private firm taking work from a\n    listed prime is material TO THE PRIME even though the winner is untradeable.\n  * Sole-source, urgent, undefinitized and letter contracts signal a program under\n    schedule pressure -- often a bigger tell than the dollar figure.\n  * Foreign military sales carry different margin and political risk than domestic.\n\nHONESTY\n  * Most announcements are routine. Saying so is the correct answer, not a failure.\n  * When the awardee maps to no listed company, the only reason to score above routine\n    is a read-through to someone listed -- a competitor losing share, a supplier, a\n    program signal. Say whose stock it is about.\n  * `confidence` below 0.7 sends the award to a human. Use it. A truthful 0.5 beats a\n    confident wrong answer, and a wrong \"alert\" costs an investor more than a missed\n    \"notable\".\n\nOUTPUT\n  * `rationale`: ONE sentence an investor would actually find useful. Name the ticker\n    when there is one. No restating the award.\n  * `drivers`: 1-4 short snake_case tags, e.g. size_vs_revenue, new_program_of_record,\n    recompete_loss, incumbent_retained, ceiling_not_revenue, sustainment, fms,\n    read_through_to_prime, sole_source, share_shift.\n  * `tier` must band your own score: >=70 alert, >=40 notable, else routine.\n    Disagreeing with your own score gets your row flagged for a human.\n  * One entry per numbered award, in order, no omissions.\n\nLEARNED RULES (skills/materiality.md, version sk-5d396ec5)\n# skills/materiality.md\n\nLearned procedural rules for scoring a DoD contract award's investor materiality.\nAppend-only. Every rule cites the case that motivated it, by war.gov announcement id.\nThis file is injected into the tier-2 system prompt, so editing it invalidates the\nmateriality LLM cache — that is deliberate (CLAUDE.md, \"Writing skills for yourself\").\n\nThe deterministic pre-filter never reads this file: a threshold on `amount_usd` cannot\nbe improved by a prose rule. These rules exist for the judgement calls only — except\nR-009, which is a rule about the code.\n\nCases below were found by scanning the committed 50-announcement backfill (683 award\nparagraphs, contracts for 2026-06-22 through 2026-08-31; median award $31.0M, p25 $15.6M, p75 $77.8M).\n\n---\n\n## R-001 · the routine case is the common case, and saying so is the answer\nRoughly two in five announced awards are sustainment, spares, or a small order under a\nvehicle the market already knows about. When an award neither changes a program's\ndirection nor is large against the awardee, score it in the routine band and say why\nin one clause. Do not inflate a score because the contractor is famous.\n\n- learned_from: announcement 4530662 — \"Northrop Grumman Systems Corp., El Segundo,\n  California, has been awarded a maximum $9,380,995 modification (P00001) to a delivery\n  order (SPE4A5-25-F-7812)\". A listed name (NOC), so the pre-filter correctly refuses\n  it, but $9.4M of DLA spares is not news to a $40B-revenue company.\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.93\n\n## R-002 · the small-business asterisk bounds the COMPANY, not the AWARD\nA trailing `*` means the awardee qualified as a small business under the set-aside, not\nthat the dollar figure is small. Never treat the asterisk as evidence of immateriality\non its own; the code only pre-filters an asterisked award when it is ALSO below the\n$50M floor. Above that floor, judge it on its merits — including the read-through to\nwhichever listed prime did not win it.\n\n- learned_from: announcement 4523515 — \"Integrated Procurement Technologies,* Vandalia,\n  Ohio, has been awarded a maximum $860,700,000 firm-fixed-price, price-redetermination,\n  indefinite-delivery/indefinite-quantity contract for engine fuel tanks\", sole-source;\n  and announcement 4573283, a $55,000,000,000 multiple-award IDIQ whose first named\n  awardee is also asterisked.\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.95\n\n## R-003 · a ceiling is an option, not revenue\nAn IDIQ \"ceiling\" or \"maximum\" is the most that MAY be ordered over the life of the\nvehicle, often five to ten years, frequently across many holders, and routinely never\nfully ordered. Score the position it creates, not the headline number, and put\n`ceiling_not_revenue` in `drivers` so the rationale cannot be misread. A nine-figure\ndefinitized production order is usually worth more to an investor than a ten-figure\nceiling.\n\n- learned_from: announcement 4581800 — \"The Boeing Co., St. Louis, Missouri, has been\n  awarded a $131,230,000,000 ceiling, indefinite-delivery/indefinite-quantity contract\n  for the F-15 Eagle Crest\". Taken at face value that single line is larger than\n  Boeing's annual revenue; it is a ceiling.\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.94\n\n## R-004 · a multi-award pool ceiling is SHARED, so divide before you judge\nWhen one paragraph names several companies before a single dollar figure, or says \"as\none of N multiple award awardees\", every awardee competes for orders under one ceiling.\nExtraction emits one row per company with the shared ceiling in `amount_usd`\n(`is_multi_award=true`), so scoring each row at the full ceiling multiplies the same\nmoney N times. Score the realistic share, and say in the rationale that the figure is\nshared.\n\n- learned_from: announcement 4527010 — an $8,000,000,000 construction pool naming\n  Balfour Beatty, Clark Construction, EVCON-CWC JV,* Grunley and Whiting-Turner in one\n  paragraph; and, in the same announcement, \"True Zero Technologies LLC,* Fairfax,\n  Virginia, was awarded a $350,000,000 ceiling ... as one of nine multiple award\n  awardees\".\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.92\n\n## R-005 · on a modification, the action value is the news; cumulative face value is context\n`amount_usd` on a modification is the incremental obligation — that is the new revenue.\nA stated \"total cumulative face value\" tells you the size of the program the company\nalready holds, which is context for whether the increment matters, not a second win.\nNever score the cumulative figure as if it were announced today. Modifications are\nabout 28% of announced awards, with a median of $25.1M, so a large one is a genuine\nsignal that a program of record is expanding.\n\n- learned_from: announcement 4546541 — \"Lockheed Martin Corp., Grand Prairie, Texas, was\n  awarded a $439,387,261 undefinitized contract action for procurement of the ATACMS\n  guided missile and launching assembly. The total cumulative face value of the contract\n  is $896,708,…\"; and announcement 4560267, a $53,859,843,289 P00002 on the PAC-3\n  Production program, which is a program conversion and not $53B of same-day new work.\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.90\n\n## R-006 · an unlisted winner can still be material — name whose stock it is about\nAbout 78% of award paragraphs name a contractor that maps to no listed company. Most\nare routine, but a competitive award to a private firm is share moving away from\nsomeone, and the loser is often listed. When you score an unlisted awardee above\nroutine, the rationale MUST name the listed company the read-through is about, and\n`drivers` should carry `read_through_to_prime` or `share_shift`. If you cannot name\none, the correct answer is routine.\n\n- learned_from: announcement 4527010 — \"True Zero Technologies LLC,* Fairfax, Virginia,\n  was awarded a $350,000,000 ceiling … as one of nine multiple award awardees\", with 26\n  offers received: a competitive federal-IT services pool whose other seats are held by\n  listed integrators.\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.78\n\n## R-007 · undefinitized, urgent and letter contracts are a schedule signal\nAn undefinitized contract action (UCA) means work started before price was agreed —\nthe government could not wait. That is a statement about program urgency and about\nnegotiating leverage, and it often precedes a much larger definitized award. Treat it\nas a forward signal even when the dollar value is unremarkable; 29 of 683 paragraphs in\nthe backfill carry this language, so it is distinctive rather than boilerplate.\n\n- learned_from: announcement 4560267 — \"RTX Corp., Pratt and Whitney Military Engines,\n  East Hartford, Connecticut, is awarded a $1,295,745,898 undefinitized contract action\n  modification (P00024)\".\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.82\n\n## R-008 · foreign military sales are real revenue with a different risk profile\nFMS content (49 of 683 paragraphs) is booked revenue like any other, but it carries a\ndifferent customer, different margin, and political/approval risk domestic work does\nnot. Do not discount an award for being FMS; do say which country or program it is for\nwhen the text names one, because that is the part an investor cannot get from the\ndollar figure.\n\n- learned_from: announcement 4546541 — \"Lockheed Martin Corp., Lockheed Martin\n  Aeronautics Co., Fort Worth, Texas, is awarded a $1,603,067,858 firm-fixed-price order\n  (N0001926F2171) against a previously issued basic ordering agreement (N0001924G0010)\"\n  carrying FMS content; and announcement 4572212, a $211,435,067 P00082 under an FMS\n  case to the United Arab Emirates.\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.85\n\n## R-009 · a rule about the code: never ask the model what a threshold already answers\nThe pre-filter (`prefilter()`), the score→tier banding (`tier_for()`), the work queue\n(`detects()`, a LEFT JOIN set difference) and the feed ordering (`top_awards()`, a\nsort) are deterministic and must stay that way. The prompt asks for `tier` only because\n`schemas.MATERIALITY_FIELDS` marks it `llm=True`; `_coerce()` then overrides it from the\nscore and caps confidence when the model contradicts itself, so a disagreement becomes\na review item instead of a silently wrong band. If a future rule here would be better\nexpressed as a number, put the number in the constants block, not in this file.\n\n- learned_from: announcement 4523515 — the $860.7M asterisked award that a naive\n  \"small business ⇒ routine\" shortcut would have silenced, and announcement 4530662 —\n  the $9.4M NOC modification that a naive \"listed ⇒ notable\" shortcut would have\n  promoted. Both are decided by explicit thresholds, not by prose.\n- added: 2026-09-01T23:55Z · by: score_materiality@design · confidence: 0.90\n",
+    "prompt": "Score these 20 awards for investor materiality, one entry each, in this exact order:\n\n1. Boeing Co. (Mesa, Arizona)\n     amount=$636.1M | action=modification | listed=BA (The Boeing Company, direct) | branch=ARMY | mod=PZ0022 | base=W58RGZ-24-C-0028 | contract=W58RGZ-24-C-0028 | amount_percentile_in_window=88 | same_contractor_awards_in_window=2 totalling $653.7M\n     work: Depot-level component repair of highly complex items, system component support, unique consumable items supply, test equipment support, supply/retrograde transmission infrastructure, obsolescence management program, and supply chain management for Apache Airframe components.\n\n2. Vista Global Solutions LLC,* (San Antonio, Texas)\n     amount=$300.0M | action=multi_award_pool | listed=none known | branch=OTHER | pricing=firm-fixed-price | contract=HT003826DE013 | place=Services may be performed at locations within the continental U.S. and outside the continental U.S., supporting multiple roles of care and facility types; specific work locations will be identified at task order level | completes=August 2031 (one-year base ordering period August 2026 through August 2031, with four one-year option ordering periods) | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | small_business_setaside=yes | bids_received=29 | amount_percentile_in_window=76\n     work: All services and materials necessary to support the on-demand deployment of products within the Program Executive Office, Defense Healthcare Management Systems portfolio and related supporting components.\n\n3. Standard Aero Inc. (San Antonio, Texas)\n     amount=$62.3M | action=option_exercise | listed=SARO (StandardAero Inc, direct) | branch=NAVY | pricing=firm-fixed-price | mod=P00006 | base=N0001924D0126 | contract=N0001924D0126 | place=San Antonio, Texas (75%); and Winnipeg, Canada (25%) | completes=August 2027 | idiq=yes (ceiling, not booked revenue) | amount_percentile_in_window=51\n     work: Continued depot repair of T56-A-427 engines including power section, torque meter, gearbox, and accessories.\n\n4. Delphinus Engineering Inc.,* (Newtown Square, Pennsylvania)\n     amount=$112.8M | action=multi_award_pool | listed=none known | branch=NAVY | pricing=cost-plus-fixed-fee, indefinite-delivery/indefinite-quantity | contract=N6449826D1025 | place=Continental U.S. and overseas at various locations, including private shipyards, public Naval shipyards, military establishments, and contractor facilities | completes=July 2031 | cumulative_face_value=$112.8M | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | small_business_setaside=yes | bids_received=8 | amount_percentile_in_window=63\n     work: Hull, mechanical and electrical machinery and systems services in support of surface fleet, submarine, shore-based installations, and various maritime vessels and land-based sites.\n\n5. ADRS LLC (Honolulu, Hawaii)\n     amount=$249.0M | action=new_award | listed=none known | branch=NAVY | pricing=firm-fixed-price, indefinite-delivery/indefinite-quantity | contract=N62742-26-D-1213 | place=Various locations within NAVFAC Pacific area of responsibility including Guam/Marianas (50%), Hawaii (10%), Australia (10%), and other locations (30%) | completes=August 2031 | idiq=yes (ceiling, not booked revenue) | bids_received=1 | amount_percentile_in_window=71\n     work: Multi-discipline architect-engineer services for architectural projects at various locations under Naval Facilities Engineering Command Pacific.\n\n6. La Playa Inc. of Virginia,* (Chesapeake, Virginia)\n     amount=$112.8M | action=multi_award_pool | listed=none known | branch=NAVY | pricing=cost-plus-fixed-fee, indefinite-delivery/indefinite-quantity | contract=N6449826D1027 | place=Continental U.S. and overseas at various locations, including private shipyards, public Naval shipyards, military establishments, and contractor facilities | completes=July 2031 | cumulative_face_value=$112.8M | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | small_business_setaside=yes | bids_received=8 | amount_percentile_in_window=63\n     work: Hull, mechanical and electrical machinery and systems services in support of surface fleet, submarine, shore-based installations, and various maritime vessels and land-based sites.\n\n7. Suntest Systems (Huntsville, Alabama)\n     amount=$920.0M | action=multi_award_pool | listed=none known | branch=AIR FORCE | pricing=indefinite-delivery/indefinite-quantity | contract=FA853226DB025 | place=At various locations | completes=2036 | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | bids_received=66 | amount_percentile_in_window=92\n     work: Next generation aerospace and ground equipment to modernize and source aerospace and ground equipment.\n\n8. Integrated Procurement Technologies,* (Vandalia, Ohio)\n     amount=$860.7M | action=new_award | listed=none known | branch=DEFENSE LOGISTICS AGENCY | pricing=firm-fixed-price, price-redetermination, indefinite-delivery/indefinite-quantity | contract=SPRDL1-26-D-0026 | place=Warren, Michigan | completes=June 22, 2031 | idiq=yes (ceiling, not booked revenue) | small_business_setaside=yes | amount_percentile_in_window=92\n     work: Supply of engine fuel tanks under a five-year indefinite-delivery/indefinite-quantity contract.\n\n9. Orbis Sibro Inc. (Charleston, South Carolina)\n     amount=$148.0M | action=multi_award_pool | listed=none known | branch=NAVY | pricing=firm-fixed-price | contract=N00189-26-D-L010 | place=95% government facilities including aircraft carriers based on CNAF's need; 5% contractor facilities with exact locations to be determined at task order level | completes=July 2031 (August 2026 through July 2031 ordering period; six-month option period would extend through January 2032) | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | bids_received=6 | amount_percentile_in_window=66\n     work: Aircraft carrier readiness support including professional engineering assistance and hazardous waste and material handling to ensure protection of personnel and the environment.\n\n10. KPMG LLP (McLean, Virginia)\n     amount=$96.7M | action=modification | listed=none known | branch=NAVY | pricing=firm-fixed-price, cost-reimbursement, indefinite-delivery/indefinite-quantity | mod=P00004 | base=M9549425D5003 | contract=M9549425D5003 | place=contractor facilities (50%); the Pentagon, Arlington, Virginia (25%); Naval Support Facility, Arlington, Virginia (15%); other government facilities within the contiguous U.S (8%); and government facilities outside the contiguous U.S., including Hawaii and Guam (2%) | completes=Nov. 5, 2029 | cumulative_face_value=$198.1M | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | amount_percentile_in_window=59\n     work: Professional support services in support of Marine Corps Installations Command Headquarters.\n\n11. Neros Inc. (Torrance, California)\n     amount=$500.0M | action=new_award | listed=none known | branch=ARMY | pricing=firm-fixed-price, indefinite-delivery/indefinite-quantity | contract=W91CRB-26-D-A011 | place=Work locations and funding will be determined with each order | completes=June 30, 2031 | idiq=yes (ceiling, not booked revenue) | bids_received=1/1 solicited | amount_percentile_in_window=87\n     work: Procurement of the Archer first-person-view sUAS purpose-built attritable system, support equipment, testing, engineering support, and training.\n\n12. Tandem Defense (Richmond Hill, Georgia)\n     amount=$90.0M | action=new_award | listed=none known | branch=AIR FORCE | contract=FA8629-26-D-B006 | place=Locations as determined by follow on task orders | completes=July 19, 2028 | idiq=yes (ceiling, not booked revenue) | bids_received=10 | amount_percentile_in_window=56\n     work: Ancillary support equipment, operator training, and field service representative support for group one aerial denial unmanned aircraft systems under an indefinite-delivery/indefinite-quantity contract.\n\n13. Peraton Inc. (Herndon, Virginia)\n     amount=$300.0M | action=multi_award_pool | listed=none known | branch=OTHER | pricing=firm-fixed-price | contract=HT003826DE011 | place=Services may be performed at locations within the continental U.S. and outside the continental U.S., supporting multiple roles of care and facility types; specific work locations will be identified at task order level | completes=August 2031 (one-year base ordering period August 2026 through August 2031, with four one-year option ordering periods) | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | bids_received=29 | amount_percentile_in_window=76 | same_contractor_awards_in_window=2 totalling $409.1M\n     work: All services and materials necessary to support the on-demand deployment of products within the Program Executive Office, Defense Healthcare Management Systems portfolio and related supporting components.\n\n14. Lockheed Martin Corporation (Manassas, Virginia)\n     amount=$51.8M | action=modification | listed=LMT (Lockheed Martin Corporation, direct) | branch=NAVY | pricing=cost-plus-incentive-fee | base=N00024-18-C-6258 | contract=N00024-18-C-6258 | place=Manassas, Virginia (49%); Orlando, Florida (33%); Virginia Beach, Virginia (15%); Clearwater, Florida (1%); Andover, Massachusetts (1%); and Arlington, Virginia (1%) | completes=June 2028 | cumulative_face_value=$63.4M | amount_percentile_in_window=49 | same_contractor_awards_in_window=2 totalling $155.7M\n     work: Production of the Integrated Submarine Imaging System for new construction and in-service submarines.\n\n15. GMHill-Baker JV LLC,* (Jacksonville, Florida)\n     amount=$249.5M | action=multi_award_pool | listed=none known | branch=ARMY | pricing=order-dependent, indefinite-delivery/indefinite-quantity | contract=W91248-26-D-A020 | place=Work locations and funding will be determined with each order | completes=July 31, 2036 | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | small_business_setaside=yes | bids_received=5 | amount_percentile_in_window=73\n     work: Architect engineering design services for the planning and design of facilities and infrastructure for construction projects.\n\n16. Newton Corp. (Riverdale, Maryland)\n     amount=$920.0M | action=multi_award_pool | listed=none known | branch=AIR FORCE | pricing=indefinite-delivery/indefinite-quantity | contract=FA853226DB021 | place=At various locations | completes=2036 | multi_award_pool=yes (ceiling is SHARED) | idiq=yes (ceiling, not booked revenue) | bids_received=66 | amount_percentile_in_window=92\n     work: Next generation aerospace and ground equipment to modernize and source aerospace and ground equipment.\n\n17. BAE Systems Land & Armaments LP (Minneapolis, Minnesota)\n     amount=$22.9M | action=modification | listed=BA (BAE Systems PLC, subsidiary) | branch=NAVY | pricing=firm-fixed-price | base=N00024-25-C-5315 | contract=N00024-25-C-5315 | place=Aberdeen, South Dakota (90%), and Minneapolis, Minnesota (10%) | completes=September 2028 | amount_percentile_in_window=26\n     work: MK 41 Vertical Launching System MK 29 canister and ancillary equipment production for the Navy and the government of Japan under the Foreign Military Sales program.\n\n18. Lockheed Martin Missile and Fire Control (Grand Prairie, Texas)\n     amount=$347.5M | action=new_award | listed=LMT (Lockheed Martin Corporation, subsidiary) | branch=ARMY | pricing=cost-plus-incentive-fee | contract=W31P4Q-26-F-0114 | place=Work locations and funding will be determined with each order | completes=Dec. 31, 2028 | idiq=yes (ceiling, not booked revenue) | bids_received=1 | amount_percentile_in_window=80\n     work: Development, fabrication and testing of improvements to prototype air and missile defense systems.\n\n19. Analog Devices Federal LLC (Tampa, Florida)\n     amount=$15.1M | action=new_award | listed=ADI (Analog Devices Inc., subsidiary) | branch=ARMY | pricing=firm-fixed-price | contract=W51AA1-26-C-A006 | place=Tobyhanna, Pennsylvania | completes=Feb. 28, 2027 | bids_received=1 | amount_percentile_in_window=17\n     work: New production and battery refresh of the KOV-21 cryptographic card module.\n\n20. ManTech Advanced Systems International Inc. (Herndon, Virginia)\n     amount=$49.8M | action=modification | listed=none known | branch=NAVY | pricing=cost-plus-fixed-fee, cost reimbursable, indefinite-delivery/indefinite-quantity | mod=P00014 | base=N0042122D0101 | contract=N0042122D0101 | place=Oceana, Virginia (26%); Herndon, Virginia (18%); Patuxent River, Maryland (17%); Lemoore, California (17%); Whidbey, Washington (17%); and Fallon, Nevada (5%) | completes=September 2027 | idiq=yes (ceiling, not booked revenue) | amount_percentile_in_window=48\n     work: Engineering and technical services including research, development, integration, analysis, acquisition, and technical training support for Naval Air Systems Command Weaponeering Integration and related programs.\n",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "scores": {
+          "type": "array",
+          "description": "Exactly one entry per numbered award, in the same order as the list, including awards you are unsure about.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "score": {
+                "type": "integer",
+                "description": "0-100 investor relevance"
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "alert",
+                  "notable",
+                  "routine"
+                ],
+                "description": "alert = tell an investor now; notable = worth a look; routine = noise"
+              },
+              "rationale": {
+                "type": "string",
+                "description": "One sentence an investor would actually find useful"
+              },
+              "drivers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Short tags for what drove the score, e.g. size_vs_revenue, new_program, recompete_loss"
+              },
+              "confidence": {
+                "type": "number",
+                "description": "0.0-1.0, how sure you are of THIS score. Below 0.7 sends the award to a human. An honest 0.5 is far more useful than a confident wrong answer."
+              }
+            },
+            "required": [
+              "score",
+              "tier",
+              "rationale",
+              "drivers",
+              "confidence"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "scores"
+      ],
+      "additionalProperties": false
+    },
+    "max_tokens": 5500
+  },
+  "usage": {
+    "input_tokens": 7686,
+    "output_tokens": 1922
+  },
+  "output": {
+    "scores": [
+      {
+        "score": 72,
+        "tier": "alert",
+        "rationale": "BA receives $636M modification to Apache component repair contract, a program of record expansion that matters to a company generating ~$85B annual revenue but represents meaningful backlog deepening on a core Army platform.",
+        "drivers": [
+          "modification_expands_program",
+          "depot_sustainment",
+          "size_vs_revenue"
+        ],
+        "confidence": 0.82
+      },
+      {
+        "score": 28,
+        "tier": "routine",
+        "rationale": "Vista Global Solutions receives $300M healthcare services IDIQ ceiling shared among 29 awardees; this is an option pool, not booked revenue, and the awardee is unlisted and noncompetitive on a healthcare admin program.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "healthcare_services"
+        ],
+        "confidence": 0.88
+      },
+      {
+        "score": 35,
+        "tier": "routine",
+        "rationale": "StandardAero (SARO) exercises option for $62.3M on T56 engine depot repair; routine sustainment of a program already held, modestly sized against a company with ~$800M revenue.",
+        "drivers": [
+          "option_exercise",
+          "sustainment",
+          "size_vs_revenue"
+        ],
+        "confidence": 0.79
+      },
+      {
+        "score": 26,
+        "tier": "routine",
+        "rationale": "Delphinus Engineering receives $112.8M hull/mechanical services IDIQ ceiling shared among 8 awardees in a competitive naval shipyard pool; ceiling, not revenue, divided by competition.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "competitive_pool"
+        ],
+        "confidence": 0.86
+      },
+      {
+        "score": 23,
+        "tier": "routine",
+        "rationale": "ADRS LLC receives $249M architectural services IDIQ ceiling as sole bidder (1 offer received); sole-source ceiling on design work is a schedule signal but ADRS is unlisted and work is routine facility planning.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "sole_source",
+          "idiq_design_services"
+        ],
+        "confidence": 0.75
+      },
+      {
+        "score": 26,
+        "tier": "routine",
+        "rationale": "La Playa Inc. receives $112.8M hull/mechanical services IDIQ ceiling shared among 8 awardees; identical pool structure to award 4, ceiling divided by competition.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "competitive_pool"
+        ],
+        "confidence": 0.88
+      },
+      {
+        "score": 18,
+        "tier": "routine",
+        "rationale": "Suntest Systems receives $920M aerospace/ground equipment IDIQ ceiling shared among 66 competitive bidders; headline number masks deep competition and multi-year ceiling for unspecified modernization.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "high_bid_count"
+        ],
+        "confidence": 0.89
+      },
+      {
+        "score": 44,
+        "tier": "notable",
+        "rationale": "Integrated Procurement Technologies (small business, unlisted) receives $860.7M engine fuel tank supply ceiling sole-source on DLA; large enough to signal supply chain consolidation, but ceiling nature and small-business status limit read-through to OEMs.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "sole_source",
+          "supply_chain"
+        ],
+        "confidence": 0.72
+      },
+      {
+        "score": 24,
+        "tier": "routine",
+        "rationale": "Orbis Sibro receives $148M aircraft carrier readiness services IDIQ ceiling shared among 6 awardees; ceiling divided by competition on routine carrier support.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "sustainment"
+        ],
+        "confidence": 0.87
+      },
+      {
+        "score": 27,
+        "tier": "routine",
+        "rationale": "KPMG LLP receives $96.7M modification to Marine Corps staff support contract shared in multi-award pool; small increment on consulting services program, unlisted awardee.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "modification",
+          "professional_services"
+        ],
+        "confidence": 0.81
+      },
+      {
+        "score": 48,
+        "tier": "notable",
+        "rationale": "Neros Inc. receives $500M sole-source Archer sUAS IDIQ ceiling (1 of 1 solicited); sole-source and high bid floor suggests new program of record for small attritable drone, but ceiling structure and unlisted awardee limit alert-tier scoring.",
+        "drivers": [
+          "new_program_of_record",
+          "sole_source",
+          "ceiling_not_revenue"
+        ],
+        "confidence": 0.7
+      },
+      {
+        "score": 32,
+        "tier": "routine",
+        "rationale": "Tandem Defense receives $90M aerial denial UAS support IDIQ ceiling from 10 bidders; ceiling on sustainment/training work for established platform, unlisted awardee.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "competitive_award",
+          "sustainment"
+        ],
+        "confidence": 0.83
+      },
+      {
+        "score": 30,
+        "tier": "routine",
+        "rationale": "Peraton Inc. receives $300M healthcare services IDIQ ceiling shared among 29 awardees, identical pool to award 2; ceiling divided by heavy competition on healthcare admin program, and Peraton's other window wins ($409M) show routine sustainment pattern.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "healthcare_services"
+        ],
+        "confidence": 0.87
+      },
+      {
+        "score": 38,
+        "tier": "routine",
+        "rationale": "Lockheed Martin (LMT) receives $51.8M modification to submarine imaging system; small increment on established program, cumulative face value $63.4M shows modest total vehicle, immaterial to $165B-revenue parent.",
+        "drivers": [
+          "modification_sustains_program",
+          "size_vs_revenue",
+          "naval_systems"
+        ],
+        "confidence": 0.84
+      },
+      {
+        "score": 27,
+        "tier": "routine",
+        "rationale": "GMHill-Baker JV receives $249.5M facilities architect-engineering IDIQ ceiling shared among 5 small-business bidders over decade-long ordering period; ceiling divided by competition, design services only.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "design_services"
+        ],
+        "confidence": 0.85
+      },
+      {
+        "score": 18,
+        "tier": "routine",
+        "rationale": "Newton Corp. receives $920M aerospace/ground equipment IDIQ ceiling shared among 66 bidders; duplicate structure and deep competition with award 7, headline ceiling masks per-awardee share.",
+        "drivers": [
+          "ceiling_not_revenue",
+          "multi_award_pool_shared",
+          "high_bid_count"
+        ],
+        "confidence": 0.9
+      },
+      {
+        "score": 29,
+        "tier": "routine",
+        "rationale": "BAE Systems Land & Armaments receives $22.9M modification for MK 41 launcher canister production including FMS for Japan; small increment on established naval platform, FMS content noted but size immaterial to BAE parent.",
+        "drivers": [
+          "modification_sustains_program",
+          "fms",
+          "size_vs_revenue"
+        ],
+        "confidence": 0.83
+      },
+      {
+        "score": 64,
+        "tier": "notable",
+        "rationale": "Lockheed Martin Missile and Fire Control receives $347.5M sole-source air-defense system development IDIQ ceiling; sole-source prototyping suggests rapid fielding need and potential new program milestone, but ceiling structure and sole-source dev work limit confirmation of production commitment.",
+        "drivers": [
+          "new_program_development",
+          "sole_source",
+          "ceiling_not_revenue"
+        ],
+        "confidence": 0.68
+      },
+      {
+        "score": 22,
+        "tier": "routine",
+        "rationale": "Analog Devices Federal (ADI subsidiary) receives $15.1M sole-source cryptographic card production; small program of interest to parent (ADI ~$73B revenue) but sole-source only reflects existing form-factor locked-in design.",
+        "drivers": [
+          "sustainment",
+          "sole_source_locked_design",
+          "size_vs_revenue"
+        ],
+        "confidence": 0.81
+      },
+      {
+        "score": 32,
+        "tier": "routine",
+        "rationale": "ManTech Advanced Systems (unlisted) receives $49.8M modification to naval weaponeering engineering services under cost-plus contract; routine sustainment increment on established technical support program.",
+        "drivers": [
+          "modification_sustains_program",
+          "engineering_services",
+          "cost_plus"
+        ],
+        "confidence": 0.84
+      }
+    ]
+  }
+}

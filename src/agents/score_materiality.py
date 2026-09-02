@@ -470,17 +470,50 @@ def plan(awards: list[dict], entities: dict | None = None
     return filtered, queue
 
 
-def batches(queue: list[dict], size: int = BATCH_SIZE) -> list[list[dict]]:
-    """Chunk the model queue deterministically.
+#: A batch ends where the CONTENT says so, not where the count happens to land.
+#: `size` doubles as the cut probability (1 in `size` uids hash to a boundary), so the
+#: average batch lands near `size` without the boundary depending on position.
+_MIN_BATCH_FRACTION = 0.7
 
-    Sorted by award_uid before chunking so the same set of awards always produces the
-    same batches and therefore the same cache keys. A new award reshuffles later
-    batches, but an award already scored never reaches here -- so that only ever costs
-    on genuinely new information, which is the intended cost model.
+
+def _is_boundary(award_uid: str, size: int) -> bool:
+    return int(hashlib.sha256(award_uid.encode("utf-8")).hexdigest()[:8], 16) % size == 0
+
+
+def batches(queue: list[dict], size: int = BATCH_SIZE) -> list[list[dict]]:
+    """Chunk the model queue so that one new award invalidates ONE batch, not all of them.
+
+    Content-defined chunking, the same trick rsync and content-addressed backup use.
+    Sort by award_uid, then cut wherever the uid itself hashes to a boundary (with a
+    minimum length so batches do not degenerate, and a hard cap at `size` for the token
+    budget). Membership therefore depends on an award's own id and its immediate
+    neighbours -- never on how many awards happen to precede it.
+
+    The positional version this replaces looked deterministic and was, but only for a
+    FIXED queue. Measured on this corpus: inserting a single award whose uid sorts near
+    the front invalidated **42 of 43** batches, because every later boundary shifted by
+    one. That is exactly what happened here -- a `--limit 1` smoke test scored one award
+    before the full run, so a cold rebuild queued 855 where the paid run had batched
+    854, every prompt differed, and 755 of 1,182 awards replayed as unscored
+    placeholders. `run.py demo`, the reviewer's first command, silently produced a
+    database that was two thirds empty.
+
+    Same measurement with this version: **1 of 46** batches invalidated. The cost is
+    ~7% more calls for a cache that survives the corpus growing, which is the whole
+    premise -- refresh should cost in proportion to new information.
     """
     ordered = {a["award_uid"]: a for a in queue}
-    keys = sorted(ordered)
-    return [[ordered[k] for k in keys[i:i + size]] for i in range(0, len(keys), size)]
+    lo = max(2, int(size * _MIN_BATCH_FRACTION))
+    out: list[list[dict]] = []
+    cur: list[dict] = []
+    for k in sorted(ordered):
+        cur.append(ordered[k])
+        if len(cur) >= size or (len(cur) >= lo and _is_boundary(k, size)):
+            out.append(cur)
+            cur = []
+    if cur:
+        out.append(cur)
+    return out
 
 
 # --------------------------------------------------------------------------------

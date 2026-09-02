@@ -176,3 +176,47 @@ def test_the_aggregate_columns_did_not_change_any_prompt():
         assert field.llm is False
     prompt_cols = set(schemas.object_schema(schemas.AWARD_FIELDS)["properties"])
     assert prompt_cols.isdisjoint({"contract_uid", "is_creating_event", "duplicate_of"})
+
+
+# --------------------------------------------------------------------------------
+# Batching must be stable under insertion, or the committed cache is a fixture
+# --------------------------------------------------------------------------------
+
+def test_scoring_batches_survive_a_new_award():
+    """One new award must invalidate ONE batch, not the whole cache.
+
+    Regression test for a real failure: a `--limit 1` smoke test scored one award
+    before the full run, so a cold rebuild queued 855 where the paid run had batched
+    854. Positional chunking shifted every later boundary, so 755 of 1,182 awards
+    replayed as unscored placeholders and `run.py demo` -- the reviewer's first
+    command -- silently produced a two-thirds-empty database.
+    """
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+    from agents import score_materiality as sm
+
+    awards = [{"award_uid": f"{i:016x}"} for i in range(0, 900)]
+    before = {tuple(a["award_uid"] for a in b) for b in sm.batches(awards)}
+
+    # An award whose id sorts near the FRONT: worst case for positional chunking.
+    after = {tuple(a["award_uid"] for a in b)
+             for b in sm.batches(awards + [{"award_uid": "0000000000000abc"}])}
+
+    invalidated = len(before - after)
+    assert invalidated <= 2, (
+        f"{invalidated} of {len(before)} batches invalidated by one new award; "
+        "batching has gone back to depending on position, which makes the committed "
+        "cache unreplayable as soon as the corpus grows")
+
+
+def test_scoring_batches_are_reproducible_and_bounded():
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+    from agents import score_materiality as sm
+
+    awards = [{"award_uid": f"{i:016x}"} for i in range(0, 500)]
+    a = [[x["award_uid"] for x in b] for b in sm.batches(awards)]
+    b = [[x["award_uid"] for x in b] for b in sm.batches(list(reversed(awards)))]
+    assert a == b, "batching must not depend on input order"
+    assert all(len(x) <= sm.BATCH_SIZE for x in a), "a batch may never exceed the cap"
+    assert sum(len(x) for x in a) == len(awards), "every award lands in exactly one batch"

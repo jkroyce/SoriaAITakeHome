@@ -98,6 +98,7 @@ Exactly one owner per file. Do not cross these lines.
 | `src/agents/extract.py` | Agent A | Prose → award rows |
 | `src/agents/resolve_entity.py` | Agent B | Contractor → ticker |
 | `src/agents/score_materiality.py` | Agent E | Investor relevance |
+| `src/agents/diagnose.py` | Agent F | Reads what acquisition and extraction produced, diagnoses the root cause when something is wrong, and **proposes** the fix. Never applies one. |
 | `src/store.py` | Agent C | DuckDB init, upserts, exports. **No model calls.** |
 | `app.py` | Agent D | Streamlit UI |
 | `src/manager.py` | Wave 2 | Runtime orchestrator |
@@ -154,6 +155,30 @@ class CleaningAgent(Protocol):
 Return a `confidence` on every result. Below **0.7** the manager escalates to Opus;
 still low, it goes to `review_queue` for a human. Be honest about confidence — a
 truthful 0.5 is far more useful than a confident wrong answer.
+
+## The pipeline watching itself
+
+`src/agents/diagnose.py` is the only agent whose subject is the system rather than the
+data. The others ask "what does this document say?"; this one asks "is the thing that
+read it still correct?" Source drift is silent — war.gov rewrites a header and the
+extractor keeps returning rows that are quietly wrong — and nothing else looks for it.
+
+Same three tiers as everywhere else: deterministic checks find the symptoms (11 SQL
+checks over what is already stored, so a healthy pipeline costs **$0 and makes no
+call**), and a model is asked only the question a threshold cannot answer — *why*.
+`source_changed`, `extractor_gap`, `schema_gap`, `data_quality`, or `transient`.
+
+**What it may not do, and why that is the design.** It may propose a rule for
+`skills/extraction.md`, which then faces the same golden gate as any other rule. It may
+**not** edit `src/schemas.py` — frozen, owner-only — and it may **not** edit any other
+source file. It writes a proposal to `data/diagnosis/` and a `review_queue` row.
+
+This agent judges the output of the very code it would be editing. A wrong diagnosis
+that auto-applied would erase its own evidence, and nobody would have seen the change.
+The value here is a correct diagnosis in front of a human quickly, not an unattended
+commit. Its selftest asserts the restraint rather than trusting it: exactly one
+`write_text` in the runtime code, no `unlink`, no `rmtree`, no write path to the
+contract.
 
 ## Writing skills for yourself
 
