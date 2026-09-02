@@ -52,6 +52,7 @@ processes one document the cache has never seen, live, capped at $0.25. Needs
 ## Limits I set
 
 - No second AI verification layer over extraction.
+- No Job scheduler for demo purposes
 - Low-confidence entries are detected and queued (23), but there's no tooling to work
   through the queue.
 - 50 weekdays. Most modifications reference contracts awarded years earlier, so ~93%

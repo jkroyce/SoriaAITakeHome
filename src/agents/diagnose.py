@@ -177,6 +177,26 @@ CHECKS: list[Check] = [
           "it matters here only if the same KIND of entry keeps recurring, which would "
           "make it a rules gap rather than a hard document."),
 
+    Check("RESOLVE_TICKER_COLLISION", "extraction", "critical",
+          # Compare the FIRST word of the parent name, not the whole string. One
+          # company written two ways ('AECOM' and 'AECOM Technology Corporation') is a
+          # naming inconsistency and not worth waking anyone for; two genuinely
+          # different firms ('Boeing' and 'BAE Systems') differ from the first word.
+          "SELECT e.contractor_raw, e.ticker || ' -> ' || e.parent_company FROM entities e "
+          "JOIN (SELECT ticker FROM entities "
+          "       WHERE ticker IS NOT NULL AND ticker <> '' AND parent_company IS NOT NULL "
+          "       GROUP BY 1 "
+          "      HAVING count(DISTINCT lower(split_part(trim(parent_company), ' ', 1))) > 1) d "
+          "  ON d.ticker = e.ticker "
+          "ORDER BY e.ticker, e.parent_company",
+          "One ticker claimed by two different parent companies",
+          "A ticker is the whole point of resolution, so two companies sharing one is "
+          "the most damaging error the pipeline can make: a holder sees another firm's "
+          "contracts under their position. Real cause is usually a symbol that means "
+          "different things on different exchanges -- BA is Boeing on the NYSE while "
+          "BAE Systems is BA. in London -- so the fix is an explicit alias in "
+          "data/universe.csv, not a prompt change."),
+
     Check("EXTRACT_THIN_DOCUMENT", "extraction", "medium",
           "SELECT a.announcement_id, 'awards=' || CAST(count(w.award_uid) AS VARCHAR) "
           "|| ' body_chars=' || CAST(max(a.body_chars) AS VARCHAR) "

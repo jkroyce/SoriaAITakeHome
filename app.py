@@ -758,7 +758,12 @@ def show_table(df: pd.DataFrame, tier_col: str | None = None, height: int | None
         # row, dismiss it, change a filter, and it springs back. Re-mounting the table
         # under a fresh key is what actually clears the selection, which also means the
         # same row can be clicked a second time and still open.
-        kwargs.update(on_select="rerun", selection_mode="single-row",
+        # Cell selection as well as row selection, so a click on the Ticker cell can
+        # open the company while a click anywhere else opens the contract. This is
+        # what replaced LinkColumn for navigation: a link cell is an <a href>, and the
+        # grid opens those in a NEW BROWSER TAB with no option to change the target.
+        # A modal is the right weight for "who is this company", not a second tab.
+        kwargs.update(on_select="rerun", selection_mode=["single-row", "single-cell"],
                       key=f"{key}__{st.session_state.get(f'_sel_nonce_{key}', 0)}")
     elif key:
         kwargs["key"] = key
@@ -776,22 +781,42 @@ def show_table(df: pd.DataFrame, tier_col: str | None = None, height: int | None
         return st.dataframe(df, **kwargs)
 
 
-def selected_row(sel, key: str) -> int | None:
-    """The row a user just clicked, returned EXACTLY ONCE.
+def selected_hit(sel, key: str) -> tuple[int | None, str | None]:
+    """What the user just clicked -- (row position, column name) -- exactly ONCE.
 
     Pair with `show_table(..., select=True, key=key)`: reading the click bumps that
     table's nonce, so the next rerun mounts a fresh widget with no selection and the
     modal does not reopen on its own. See the note in `show_table`.
+
+    The column matters because the destination depends on it: the Ticker cell opens the
+    company, everything else opens the contract. `selection.cells` carries
+    (row_position, column_name) pairs, which is the only per-cell signal the grid
+    gives -- and the reason this does not use a link column.
     """
+    row, col = None, None
     try:
-        rows = list(sel.selection.rows)
+        cells = list(sel.selection.cells)
     except Exception:
-        return None
-    if not rows:
-        return None
+        cells = []
+    if cells:
+        row, col = int(cells[0][0]), str(cells[0][1])
+    else:
+        try:
+            rows = list(sel.selection.rows)
+        except Exception:
+            rows = []
+        if rows:
+            row = int(rows[0])
+    if row is None:
+        return None, None
     slot = f"_sel_nonce_{key}"
     st.session_state[slot] = st.session_state.get(slot, 0) + 1
-    return int(rows[0])
+    return row, col
+
+
+def selected_row(sel, key: str) -> int | None:
+    """Just the row, for tables where every column leads to the same place."""
+    return selected_hit(sel, key)[0]
 
 
 def empty_state(table: str, what: str) -> None:
@@ -826,31 +851,24 @@ def tier_text(v) -> str:
 # another panel onto an already dense page.
 # ---------------------------------------------------------------------------------
 
-TICKER_COL = st.column_config.LinkColumn(
-    "Ticker", help="Open this company", display_text=r"ticker=([A-Z.]+)")
+#: Plain text, deliberately NOT a LinkColumn. A link cell renders an <a href> and the
+#: grid opens it in a new browser tab, with no target option exposed -- wrong weight for
+#: "who is this company". Cell selection carries the click instead; see `selected_hit`.
+TICKER_COL = st.column_config.TextColumn("Ticker", help="Click to open this company")
 
-CONTRACT_COL = st.column_config.LinkColumn(
-    "Contract", help="Open this contract", display_text=r"contract=(.+)$")
+CONTRACT_COL = st.column_config.TextColumn("Contract", help="Click to open this contract")
 
 
 def ticker_link(v) -> str:
-    """A ticker cell rendered as a link. st.dataframe cannot attach a callback to a
-    cell, and row-selection swallows the click, so the cell carries a query-param
-    URL and the shell opens the modal on the resulting rerun."""
+    """The ticker as it should read in a cell. Named for its old job; now just text."""
     t = txt(v, "")
-    return f"?ticker={t}" if t and t != DASH else ""
+    return t if t and t != DASH else ""
 
 
 def contract_link(v) -> str:
-    """A contract cell rendered as a link, addressed by its printed number.
-
-    Streamlit cannot open a dialog from inside another dialog, so every hop in
-    Event -> Contract -> Company is a query param plus a rerun: the current modal
-    closes and the next one opens. Using the contract NUMBER rather than its uid
-    keeps the link legible and lets `display_text` show it without a second column.
-    """
+    """The contract number as it should read in a cell."""
     t = txt(v, "")
-    return f"?contract={t}" if t and t != DASH else ""
+    return t if t and t != DASH else ""
 
 
 def pretty_date(v) -> str:
@@ -1012,6 +1030,11 @@ def ticker_dialog(frames, df, ticker: str) -> None:
                 "Events": st.column_config.NumberColumn("Events", format="%d"),
                 "Mods": st.column_config.NumberColumn("Mods", format="%d"),
             })
+        # Deliberately NOT selectable. A selection inside a modal triggers a rerun, and
+        # by then the state that opened the modal has been consumed, so the modal does
+        # not re-render and the click is silently swallowed. A row that looks clickable
+        # and does nothing is worse than one that does not invite the click; contracts
+        # are reachable from the Contracts tab and from any event.
     else:
         show_table(pd.DataFrame({
             "Date": sub["announced_date"].map(pretty_date),
@@ -1154,7 +1177,13 @@ def contract_dialog(frames, df, number: str, event=None) -> None:
     ])
 
     if ticker and ticker != DASH:
-        st.markdown(f"[View {name} and its other contracts →](?ticker={ticker})")
+        # No button here on purpose. A widget inside a modal is dead: clicking it
+        # reruns the script, but the state that opened the modal was consumed on the
+        # way in, so the modal is not re-rendered and the widget's body never executes.
+        # A control that looks live and does nothing is the worst option, so this says
+        # where to click instead -- the Ticker cell in any table opens the company.
+        st.caption(f"Click the **{ticker}** cell in any table to open "
+                   f"{name} and its other contracts.")
 
     # The event that was clicked keeps its own reasoning and audit trail, one level
     # down: the contract answers "what is this", the event answers "why now".
@@ -1331,9 +1360,13 @@ def view_events(frames, df):
                 "Score": st.column_config.NumberColumn("Score", format="%d"),
             })
 
-    picked_row = selected_row(sel, "change_events")
+    picked_row, picked_col = selected_hit(sel, "change_events")
     if picked_row is not None:
         row = f.iloc[picked_row]
+        tkr = txt(row.get("ticker"), "")
+        if picked_col == "Ticker" and tkr:
+            ticker_dialog(frames, df, tkr)
+            return
         number = txt(row.get("contract_number"), "")
         if number:
             contract_dialog(frames, df, number, event=row)
@@ -1409,9 +1442,14 @@ def view_contracts(frames, df):
                 "Mods": st.column_config.NumberColumn("Mods", format="%d"),
             })
 
-    picked = selected_row(sel, "contracts_table")
+    picked, picked_col = selected_hit(sel, "contracts_table")
     if picked is not None:
-        contract_dialog(frames, df, txt(f.iloc[picked]["contract_number"], ""))
+        hit = f.iloc[picked]
+        tkr = txt(hit.get("ticker"), "")
+        if picked_col == "Ticker" and tkr:
+            ticker_dialog(frames, df, tkr)
+        else:
+            contract_dialog(frames, df, txt(hit["contract_number"], ""))
 
 
 def view_company(frames, df):
@@ -1782,17 +1820,16 @@ def main() -> None:
     for t, msg in errors.items():
         st.sidebar.error(f"{t}: {msg}")
 
-    # A ticker cell is a link carrying ?ticker=XX. Consume it here, open the modal,
-    # and clear it so a rerun does not reopen the same dialog forever.
-    # Navigation between modals goes through the URL, because Streamlit cannot open a
-    # dialog from inside one. Each param is consumed immediately so a later rerun does
-    # not reopen the same view forever. A contract link wins over a ticker link when
-    # both somehow appear: it is the more specific destination.
+    # A dialog cannot open another dialog, so a hop between them is queued in session
+    # state and taken here on the way back up. Each is consumed immediately, so a later
+    # rerun does not reopen the same view forever. Query params still work -- they are
+    # how a shared URL lands on a company -- but nothing in the UI creates one any
+    # more, because a link cell opens a browser tab and a modal is the right weight.
     picked_ticker = st.query_params.get("ticker")
     picked_contract = st.query_params.get("contract")
-    if picked_ticker:
+    if st.query_params.get("ticker"):
         del st.query_params["ticker"]
-    if picked_contract:
+    if st.query_params.get("contract"):
         del st.query_params["contract"]
 
     if demo:
